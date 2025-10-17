@@ -3,47 +3,68 @@ package main
 import (
 	"bot_story_generator/internal/ai"
 	"bot_story_generator/internal/config"
+	"bot_story_generator/internal/database"
 	"bot_story_generator/internal/logger"
-	"bot_story_generator/internal/tg_bot"
-	"fmt"
+	"bot_story_generator/internal/repository"
+	"bot_story_generator/internal/router"
+	"bot_story_generator/internal/service"
+	tgbot "bot_story_generator/internal/tg_bot"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 )
 
 func main() {
-	// Create logger for development
-	logger, err := logger.New()
+	logger, err := logger.NewLogger()
 	if err != nil {
-		panic("failed to initialize logger " + err.Error())
+		logger.ZapLogger.Error("Failed to initialize logger",
+			zap.Error(err),
+		)
+		return
 	}
-	logger.Info("logger initialized successfully")
+	logger.ZapLogger.Info("Successful init Logger")
 	defer logger.Sync()
-
-	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.NewConfig()
 	if err != nil {
-		logger.Fatal("failed to load config",
+		logger.ZapLogger.Error("Failed to load config",
 			zap.Error(err),
 		)
+		return
 	}
-	logger.Info("configuration loaded successfully")
-
-	// Initialize AI client
-	aiClient := ai.NewAIClient(cfg, logger)
-
-	// Initialize and start Telegram bot
-	bot, err := tgbot.NewBot(cfg, logger)
+	logger.ZapLogger.Info("Successful load config")
+	//база данных(подключение + методы репозитория)
+	pgx, err := database.NewDBObject(cfg.Database, logger)
+	defer pgx.Close()
+	storyDatabase := repository.NewStoryDatabase(pgx)
+	//ии(подключение + методы ии)
+	aiConn, err := ai.NewAIConnection(cfg, logger)
 	if err != nil {
-		logger.Fatal("failed to initialize Telegram bot",
+		logger.ZapLogger.Error("Failed to connect to AI",
 			zap.Error(err),
 		)
+		return
+	}
+	aiB := ai.NewStoryAI(aiConn, cfg.AI.Model, logger)
+	//бизнес-логика(база данных + ии)
+	storyService := service.NewStoryService(storyDatabase, aiB)
+	//роутер
+	router := router.NewRouter(storyService)
+	//бот
+	bot, err := tgbot.NewBot(cfg, logger, router)
+	if err != nil {
+		logger.ZapLogger.Error("failed to initialize Telegram bot",
+			zap.Error(err),
+		)
+		return
 	}
 	go bot.Start()
-
-	// Example usage of AI client
-	answer, err := aiClient.GetChatCompletion("Hello, how are you?")
-	if err != nil {
-		logger.Error("failed to get chat completion from AI", zap.Error(err),)
+	defer bot.Stop()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	select {
+	case sig := <-quit:
+		logger.ZapLogger.Info("Server shutting down with signal: %v", zap.Any("signal", sig))
 	}
-	fmt.Println("AI answer:", answer)
 }

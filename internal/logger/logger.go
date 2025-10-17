@@ -5,22 +5,21 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Создание нового логгера
-func New() (*zap.Logger, error) {
-	// Создаем конфиг для разработки
+type Logger struct {
+	ZapLogger *zap.Logger
+}
+
+func NewLogger() (*Logger, error) {
 	loggerConfig := zap.NewDevelopmentConfig()
-
-	// Уровень логирования: debug и выше
 	loggerConfig.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-
-	// Настройка отображения времени
 	loggerConfig.EncoderConfig.TimeKey = "timestamp"
 	loggerConfig.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	// Отключаем stacktrace для уровней ниже error
 	loggerConfig.DisableStacktrace = true
 	logger, err := loggerConfig.Build(
-		zap.AddStacktrace(zap.ErrorLevel), // stacktrace только для error и выше
+		zap.AddStacktrace(zap.ErrorLevel),
 	)
-	return logger, err
+	return &Logger{ZapLogger: logger}, err
+}
+func (l *Logger) Sync() {
+	l.ZapLogger.Sync()
 }
