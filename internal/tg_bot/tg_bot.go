@@ -3,6 +3,7 @@ package tgbot
 import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
+	"bot_story_generator/internal/models"
 	"context"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -16,8 +17,12 @@ type Bot struct {
 	api         *tgbotapi.BotAPI
 	logger      *logger.Logger
 	router      StoryRouter
+
+	OutboundChan chan models.OutboundMessage // буферизированный канал для исходящих сообщений
 }
 type StoryRouter interface {
+	AddingComand(command string, arguments []string, chatID int64)
+	GetOutboundChan(chan models.OutboundMessage)
 }
 
 func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot, error) {
@@ -45,10 +50,12 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 		logger:      logger,
 		updatesChan: updates,
 		router:      router,
+
+		OutboundChan: make(chan models.OutboundMessage, 100),
 	}, nil
 }
 
-func (bot *Bot) Start() {
+func (bot *Bot) Start_Read_Messange() {
 	for {
 		select {
 		case <-bot.ctx.Done():
@@ -57,37 +64,53 @@ func (bot *Bot) Start() {
 			if !ok {
 				return
 			}
+			bot.logger.ZapLogger.Info("Received update", zap.Any("text", update.Message.Text))
 			if update.Message == nil || !update.Message.IsCommand() {
 				continue // Игнорируем не-команды
 			}
 
-			// Создаём ответное сообщение
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
 			command := update.Message.Command() // Получаем команду без "/"
-
-			switch command {
-			case "start":
-				//
-			case "help":
-				//
-			default:
-				//
-			}
-
-			_, err := bot.api.Send(msg)
-			if err != nil {
-				bot.logger.ZapLogger.Error(
-					"failed to send message",
-					zap.Error(err),
-					zap.Int64("chat_id", update.Message.Chat.ID),
-					zap.String("user", update.Message.From.UserName),
-					zap.String("command", command),
-					zap.String("message", msg.Text),
-				)
-			}
+			bot.router.AddingComand(command, nil ,update.Message.Chat.ID)
 		}
 	}
 }
+
+func (bot *Bot) Start_Send_Messange_For_Chan() {
+	bot.OutboundChan = make(chan models.OutboundMessage, 100)
+	bot.router.GetOutboundChan(bot.OutboundChan)
+	for {
+		select {
+		case <-bot.ctx.Done():
+			return
+		case outMsg, ok := <-bot.OutboundChan:
+			if !ok {
+				return
+			}
+			bot.SendMessage(outMsg.ChatID, outMsg.Text)
+		}
+	}
+}
+
+func (bot *Bot) SendMessage(chatID int64, text string) error {
+	msg := tgbotapi.NewMessage(chatID, text)
+	_, err := bot.api.Send(msg)
+	if err != nil {
+		bot.logger.ZapLogger.Error(
+			"failed to send message",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID),
+			zap.String("message", msg.Text),
+		)
+		return err
+	}
+	bot.logger.ZapLogger.Info(
+		"message sent successfully",
+		zap.Int64("chat_id", chatID),
+		zap.String("message", msg.Text),
+	)
+	return nil
+}
+
 func (bot *Bot) Stop() {
 	bot.cancel()
 }

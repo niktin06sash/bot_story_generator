@@ -26,6 +26,7 @@ func main() {
 	}
 	logger.ZapLogger.Info("Successful init Logger")
 	defer logger.Sync()
+
 	cfg, err := config.NewConfig()
 	if err != nil {
 		logger.ZapLogger.Error("Failed to load config",
@@ -34,10 +35,16 @@ func main() {
 		return
 	}
 	logger.ZapLogger.Info("Successful load config")
+
 	//база данных(подключение + методы репозитория)
 	pgx, err := database.NewDBObject(cfg.Database, logger)
+	if err != nil {
+		// Добавть обработку ошибки подключения к базе данных
+	}
 	defer pgx.Close()
+
 	storyDatabase := repository.NewStoryDatabase(pgx)
+
 	//ии(подключение + методы ии)
 	aiConn, err := ai.NewAIConnection(cfg, logger)
 	if err != nil {
@@ -46,11 +53,15 @@ func main() {
 		)
 		return
 	}
+	
 	aiB := ai.NewStoryAI(aiConn, cfg.AI.Model, logger)
+
 	//бизнес-логика(база данных + ии)
 	storyService := service.NewStoryService(storyDatabase, aiB)
+
 	//роутер
-	router := router.NewRouter(storyService)
+	router := router.NewRouter(storyService, logger)
+
 	//бот
 	bot, err := tgbot.NewBot(cfg, logger, router)
 	if err != nil {
@@ -59,8 +70,11 @@ func main() {
 		)
 		return
 	}
-	go bot.Start()
+	go bot.Start_Read_Messange()
+	go bot.Start_Send_Messange_For_Chan()
+	go router.Start()
 	defer bot.Stop()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	select {
