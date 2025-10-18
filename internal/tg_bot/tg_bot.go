@@ -17,12 +17,11 @@ type Bot struct {
 	api         *tgbotapi.BotAPI
 	logger      *logger.Logger
 	router      StoryRouter
-
-	OutboundChan chan models.OutboundMessage // буферизированный канал для исходящих сообщений
 }
 type StoryRouter interface {
-	AddingComand(command string, arguments []string, chatID int64)
-	GetOutboundChan(chan models.OutboundMessage)
+	AddComand(ctx context.Context, command string, arguments []string, chatID int64)
+	GetOutboundChan() chan models.OutboundMessage
+	CloseCommandChan()
 }
 
 func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot, error) {
@@ -50,12 +49,10 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 		logger:      logger,
 		updatesChan: updates,
 		router:      router,
-
-		OutboundChan: make(chan models.OutboundMessage, 100),
 	}, nil
 }
 
-func (bot *Bot) Start_Read_Messange() {
+func (bot *Bot) ReadUpdateMessage() {
 	for {
 		select {
 		case <-bot.ctx.Done():
@@ -66,23 +63,22 @@ func (bot *Bot) Start_Read_Messange() {
 			}
 			bot.logger.ZapLogger.Info("Received update", zap.Any("text", update.Message.Text))
 			if update.Message == nil || !update.Message.IsCommand() {
-				continue // Игнорируем не-команды
+				continue
 			}
 
-			command := update.Message.Command() // Получаем команду без "/"
-			bot.router.AddingComand(command, nil ,update.Message.Chat.ID)
+			command := update.Message.Command()
+			bot.router.AddComand(bot.ctx, command, nil, update.Message.Chat.ID)
 		}
 	}
 }
 
-func (bot *Bot) Start_Send_Messange_For_Chan() {
-	bot.OutboundChan = make(chan models.OutboundMessage, 100)
-	bot.router.GetOutboundChan(bot.OutboundChan)
+func (bot *Bot) SendOutboundMessage() {
+	outch := bot.router.GetOutboundChan()
 	for {
 		select {
 		case <-bot.ctx.Done():
 			return
-		case outMsg, ok := <-bot.OutboundChan:
+		case outMsg, ok := <-outch:
 			if !ok {
 				return
 			}
@@ -113,4 +109,5 @@ func (bot *Bot) SendMessage(chatID int64, text string) error {
 
 func (bot *Bot) Stop() {
 	bot.cancel()
+	bot.router.CloseCommandChan()
 }

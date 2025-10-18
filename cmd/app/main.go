@@ -46,22 +46,22 @@ func main() {
 	storyDatabase := repository.NewStoryDatabase(pgx)
 
 	//ии(подключение + методы ии)
-	aiConn, err := ai.NewAIConnection(cfg, logger)
+	aiConn, err := ai.NewAIConnection(cfg, logger, cfg.AI.Model)
 	if err != nil {
 		logger.ZapLogger.Error("Failed to connect to AI",
 			zap.Error(err),
 		)
 		return
 	}
-	
-	aiB := ai.NewStoryAI(aiConn, cfg.AI.Model, logger)
+
+	aiB := ai.NewStoryAI(aiConn)
 
 	//бизнес-логика(база данных + ии)
 	storyService := service.NewStoryService(storyDatabase, aiB)
 
 	//роутер
 	router := router.NewRouter(storyService, logger)
-
+	defer router.Stop()
 	//бот
 	bot, err := tgbot.NewBot(cfg, logger, router)
 	if err != nil {
@@ -70,15 +70,13 @@ func main() {
 		)
 		return
 	}
-	go bot.Start_Read_Messange()
-	go bot.Start_Send_Messange_For_Chan()
-	go router.Start()
 	defer bot.Stop()
+	go bot.ReadUpdateMessage()
+	go bot.SendOutboundMessage()
+	go router.Start()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-	select {
-	case sig := <-quit:
-		logger.ZapLogger.Info("Server shutting down with signal: %v", zap.Any("signal", sig))
-	}
+	sig := <-quit
+	logger.ZapLogger.Info("Server shutting down with signal: %v", zap.Any("signal", sig))
 }

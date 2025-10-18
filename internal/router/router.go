@@ -1,9 +1,9 @@
 package router
 
 import (
-	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/logger"
-
+	"bot_story_generator/internal/models"
+	"context"
 	// "go.uber.org/zap"
 )
 
@@ -11,39 +11,67 @@ type StoryService interface {
 }
 
 type StoryRouterImpl struct {
-	service  StoryService
-	chan_msg chan models.Message
+	ctx           context.Context
+	cancel        context.CancelFunc
+	service       StoryService
+	chan_command  chan models.Message
 	chan_outbound chan models.OutboundMessage
-	logger      *logger.Logger
+	logger        *logger.Logger
 }
 
 func NewRouter(service StoryService, logger *logger.Logger) *StoryRouterImpl {
+	context, cancel := context.WithCancel(context.Background())
 	return &StoryRouterImpl{
-		service:  service,
-		chan_msg: make(chan models.Message, 1000),
-		logger:   logger,
+		ctx:           context,
+		cancel:        cancel,
+		service:       service,
+		chan_command:  make(chan models.Message, 1000),
+		chan_outbound: make(chan models.OutboundMessage, 1000),
+		logger:        logger,
 	}
-}
-
-func (r *StoryRouterImpl) AddingComand(command string, arguments []string, chatID int64) {
-	r.chan_msg <- models.Message{Command: command, Arguments: arguments, ChatID: chatID}
-}
-
-func (r *StoryRouterImpl) GetOutboundChan(c chan models.OutboundMessage) {
-	r.chan_outbound = c
 }
 
 func (r *StoryRouterImpl) Start() {
-	for msg := range r.chan_msg {
-		// Обработка сообщения
-		switch msg.Command {
-		case "start":
-			r.chan_outbound <- models.OutboundMessage{
-				ChatID: msg.ChatID,
-				Text:   "Welcome to the bot!",
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case msg, ok := <-r.chan_command:
+			if !ok {
+				return
 			}
-		default:
-			// unknown command
+			switch msg.Command {
+			case "start":
+				select {
+				case <-r.ctx.Done():
+					return
+				case r.chan_outbound <- models.OutboundMessage{
+					ChatID: msg.ChatID,
+					Text:   "Welcome to the bot!",
+				}:
+				}
+			default:
+			}
 		}
 	}
+}
+func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments []string, chatID int64) {
+	select {
+	case <-r.ctx.Done():
+		return
+	case <-ctx.Done():
+		return
+	case r.chan_command <- models.Message{Command: command, Arguments: arguments, ChatID: chatID}:
+	}
+}
+
+func (r *StoryRouterImpl) GetOutboundChan() chan models.OutboundMessage {
+	return r.chan_outbound
+}
+func (r *StoryRouterImpl) CloseCommandChan() {
+	close(r.chan_command)
+}
+func (r *StoryRouterImpl) Stop() {
+	r.cancel()
+	close(r.chan_outbound)
 }

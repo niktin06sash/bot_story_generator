@@ -12,11 +12,11 @@ import (
 
 type AIConnection struct {
 	client  *openai.Client
-	logger  *logger.Logger
 	timeout time.Duration
+	model   string
 }
 
-func NewAIConnection(cfg *config.Config, logger *logger.Logger) (*AIConnection, error) {
+func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*AIConnection, error) {
 	logger.ZapLogger.Info("Initializing AIConnection...")
 
 	httpClient := &http.Client{Timeout: cfg.AI.ConnectTimeout}
@@ -39,7 +39,7 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger) (*AIConnection, 
 	logger.ZapLogger.Info("AIConnection successfully initialized")
 	return &AIConnection{
 		client:  &client,
-		logger:  logger,
 		timeout: cfg.AI.ChatCompletionTimeout,
+		model:   model,
 	}, nil
 }
