@@ -3,6 +3,8 @@ package router
 import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
+	"bot_story_generator/internal/text_messages"
+
 	"context"
 	// "go.uber.org/zap"
 )
@@ -47,7 +49,29 @@ func (r *StoryRouterImpl) Start() {
 					return
 				case r.chan_outbound <- models.OutboundMessage{
 					ChatID: msg.ChatID,
-					Text:   "Welcome to the bot!",
+					Text:   text_messages.TextGreeting,
+				}:
+				}
+			case "newstory":
+				select {
+				case <-r.ctx.Done():
+					return
+				case r.chan_outbound <- models.OutboundMessage{
+					ChatID: msg.ChatID,
+					Text:   "Начинаем новое приключение",
+				}:
+				}
+			case "help":
+				text := "Вот список команд:\n"
+				for _, command := range text_messages.TextCommandForHelp {
+					text += command.Command + " - " + command.Text + "\n"
+				}
+				select {
+				case <-r.ctx.Done():
+					return
+				case r.chan_outbound <- models.OutboundMessage{
+					ChatID: msg.ChatID,
+					Text:   text,
 				}:
 				}
 			default:
@@ -55,6 +79,7 @@ func (r *StoryRouterImpl) Start() {
 		}
 	}
 }
+
 func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments []string, chatID int64) {
 	select {
 	case <-r.ctx.Done():
@@ -68,9 +93,11 @@ func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, argumen
 func (r *StoryRouterImpl) GetOutboundChan() chan models.OutboundMessage {
 	return r.chan_outbound
 }
+
 func (r *StoryRouterImpl) CloseCommandChan() {
 	close(r.chan_command)
 }
+
 func (r *StoryRouterImpl) Stop() {
 	r.cancel()
 	close(r.chan_outbound)
