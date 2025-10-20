@@ -6,10 +6,14 @@ import (
 	"bot_story_generator/internal/text_messages"
 
 	"context"
+	"fmt"
+
+	"go.uber.org/zap"
 	// "go.uber.org/zap"
 )
 
 type StoryService interface {
+	CreateStructuredHeroes(ctx context.Context, chatID int64) (*models.FantasyCharacters, bool)
 }
 
 type StoryRouterImpl struct {
@@ -58,9 +62,74 @@ func (r *StoryRouterImpl) Start() {
 					return
 				case r.chan_outbound <- models.OutboundMessage{
 					ChatID: msg.ChatID,
-					Text:   "Начинаем новое приключение",
+					Text:   text_messages.TextStartCreateHero,
 				}:
 				}
+
+				heroes, ok := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
+				if !ok {
+					r.logger.ZapLogger.Error(
+						"failed to create new hero",
+						zap.Int64("chatID", msg.ChatID),
+					)
+					select {
+					case <-r.ctx.Done():
+						return
+					case r.chan_outbound <- models.OutboundMessage{
+						ChatID: msg.ChatID,
+						Text:   text_messages.TextErrorCreateHero,
+					}:
+					}
+					continue
+				}
+
+				resp := "🌟 *Выберите своего героя из представленных вариантов:*\n\n"
+				for idx, hero := range heroes.Characters {
+					resp += fmt.Sprintf("🧙‍♂️ *Персонаж #%d*\n", idx+1)
+					resp += "───────────────────────\n"
+					if hero.Name != "" {
+						resp += fmt.Sprintf("🏷️ *Имя:* %s\n", hero.Name)
+					}
+					if hero.Race != "" {
+						resp += fmt.Sprintf("🧬 *Раса:* %s\n", hero.Race)
+					}
+					if hero.Class != "" {
+						resp += fmt.Sprintf("⚔️ *Класс:* %s\n", hero.Class)
+					}
+					if hero.Appearance != "" {
+						resp += fmt.Sprintf("🪞 *Внешность:* %s\n", hero.Appearance)
+					}
+					if len(hero.Traits) > 0 {
+						resp += "💭 *Черты характера:* "
+						for i, trait := range hero.Traits {
+							if i > 0 {
+								resp += ", "
+							}
+							resp += trait
+						}
+						resp += "\n"
+					}
+					if hero.Feature != "" {
+						resp += fmt.Sprintf("✨ *Особенность:* %s\n", hero.Feature)
+					}
+					if hero.Biography != "" {
+						resp += fmt.Sprintf("📜 *Биография:* %s\n", hero.Biography)
+					}
+					if hero.Tone != "" {
+						resp += fmt.Sprintf("🎭 *Тон:* %s\n", hero.Tone)
+					}
+					resp += "\n───────────────────────\n\n"
+				}
+
+				select {
+				case <-r.ctx.Done():
+					return
+				case r.chan_outbound <- models.OutboundMessage{
+					ChatID: msg.ChatID,
+					Text:   resp,
+				}:
+				}
+
 			case "help":
 				text := "Вот список команд:\n"
 				for _, command := range text_messages.TextCommandForHelp {

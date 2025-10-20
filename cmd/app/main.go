@@ -57,7 +57,7 @@ func main() {
 	aiB := ai.NewStoryAI(aiConn)
 
 	//бизнес-логика(база данных + ии)
-	storyService := service.NewStoryService(storyDatabase, aiB)
+	storyService := service.NewStoryService(storyDatabase, aiB, logger)
 
 	//роутер
 	router := router.NewRouter(storyService, logger)

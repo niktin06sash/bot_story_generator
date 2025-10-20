@@ -1,7 +1,10 @@
 package ai
 
 import (
+	"bot_story_generator/internal/models"
+
 	"context"
+	"encoding/json"
 
 	"github.com/openai/openai-go/v3"
 )
@@ -16,7 +19,6 @@ func NewStoryAI(conn *AIConnection) *StoryAIImpl {
 	}
 }
 
-// remove logging from methods and move them to the service layer
 func (ah *StoryAIImpl) GetChatCompletion(messageHistory string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ah.conn.timeout)
 	defer cancel()
@@ -24,20 +26,59 @@ func (ah *StoryAIImpl) GetChatCompletion(messageHistory string) (string, error) 
 	params := openai.ChatCompletionNewParams{
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage("You are a helpful assistant. Answer on Russian concisely."),
+			openai.SystemMessage(""),
 			openai.UserMessage(messageHistory),
 		},
 	}
 
 	resp, err := ah.conn.client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		//ah.conn.logger.ZapLogger.Error("Chat completion request failed", zap.Error(err))
 		return "", err
 	}
 	if resp == nil || len(resp.Choices) == 0 {
-		//ah.conn.logger.ZapLogger.Error("Empty response from chat completion")
 		return "", nil
 	}
 	answer := resp.Choices[0].Message.Content
 	return answer, nil
+}
+
+// GetStructuredHeroes возвращает типизированную структуру персонажей
+func (ah *StoryAIImpl) GetStructuredHeroes(messageHistory string) (*models.FantasyCharacters, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ah.conn.timeout)
+	defer cancel()
+
+	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
+		Name:        "fantasy_characters",
+		Description: openai.String("Массив фэнтезийных персонажей"),
+		Schema:      models.FantasyCharactersResponseSchema,
+		Strict:      openai.Bool(true),
+	}
+
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel(ah.conn.model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(""),
+			openai.UserMessage(messageHistory),
+		},
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: schemaParam,
+			},
+		},
+	}
+
+	resp, err := ah.conn.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return nil, nil
+	}
+
+	var fantasyCharacters models.FantasyCharacters
+	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &fantasyCharacters); err != nil {
+		return nil, err
+	}
+
+	return &fantasyCharacters, nil
 }
