@@ -22,7 +22,7 @@ type Bot struct {
 	numworkers  int
 }
 type StoryRouter interface {
-	AddComand(ctx context.Context, command string, arguments map[string]string, chatID int64)
+	AddComand(ctx context.Context, data string, chatID int64)
 	GetOutboundChan() chan models.OutboundMessage
 	CloseCommandChan()
 }
@@ -77,21 +77,29 @@ func (bot *Bot) readIncommingMessage() {
 			if !ok {
 				return
 			}
-			chatId := update.Message.Chat.ID
-			text := update.Message.Text
-			msg := update.Message
-			bot.logger.ZapLogger.Info("Received update", zap.Any("text", text))
-			
-			if msg.IsCommand(){
-				command := update.Message.Command()
-				bot.router.AddComand(bot.ctx, command, nil, chatId)
-				
-			} else if msg != nil {
-				if _, ok := models.PossibleAnswersToStory[msg.Text]; ok {
-					bot.router.AddComand(bot.ctx, "userChoice",map[string]string{"option": msg.Text}, chatId)
+			if update.CallbackQuery != nil {
+				data := update.CallbackQuery.Data
+				chatID := update.CallbackQuery.Message.Chat.ID
+				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data))
+				bot.router.AddComand(bot.ctx, data, chatID)
+				//после нажатия на кнопку выбора она исчезает с экрана(надо тестить и проверять как это отображается)
+				edit := tgbotapi.NewEditMessageReplyMarkup(
+					chatID,
+					update.CallbackQuery.Message.MessageID,
+					tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}},
+				)
+				bot.api.Request(edit)
+				callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
+				bot.api.Request(callback)
+			} else if update.Message != nil {
+				chatId := update.Message.Chat.ID
+				text := update.Message.Text
+				msg := update.Message
+				if msg.IsCommand() {
+					bot.logger.ZapLogger.Info("Received update", zap.Any("text", text))
+					command := update.Message.Command()
+					bot.router.AddComand(bot.ctx, command, chatId)
 				}
-			}else{
-				continue
 			}
 		}
 	}
@@ -107,13 +115,25 @@ func (bot *Bot) sendOutboundMessage() {
 			if !ok {
 				return
 			}
-			bot.sendMessage(outMsg.ChatID, outMsg.Text)
+			bot.sendMessage(outMsg.ChatID, outMsg.Text, outMsg.ButtonArgs)
 		}
 	}
 }
 
-func (bot *Bot) sendMessage(chatID int64, text string) error {
+func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg) error {
 	msg := tgbotapi.NewMessage(chatID, text)
+	if butarg != nil && len(butarg) > 0 {
+		var rows [][]tgbotapi.InlineKeyboardButton
+		for _, btn := range butarg {
+			for _, arg := range btn.Args {
+				button := tgbotapi.NewInlineKeyboardButtonData(arg, btn.ButtonName+arg)
+				row := tgbotapi.NewInlineKeyboardRow(button)
+				rows = append(rows, row)
+			}
+		}
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+		msg.ReplyMarkup = keyboard
+	}
 	_, err := bot.api.Send(msg)
 	if err != nil {
 		bot.logger.ZapLogger.Error(

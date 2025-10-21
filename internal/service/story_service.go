@@ -4,6 +4,7 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
+	"strconv"
 
 	"context"
 	"os"
@@ -48,5 +49,22 @@ func (s *StoryServiceImpl) CreateStructuredHeroes(ctx context.Context, chatID in
 		return "", err
 	}
 	resp := text_messages.TextChooseHero(fantasyCharacters)
-	return resp, err
+	return resp, nil
+}
+func (s *StoryServiceImpl) UserChoice(ctx context.Context, chatID int64, data string) (string, error) {
+	_, err := strconv.Atoi(data)
+	if err != nil {
+		s.logger.ZapLogger.Error("invalid user choice", zap.String("choice", data), zap.Error(err), zap.Int64("chat_id", chatID))
+		return "", err
+	}
+	//TODO записывем выбор в бд
+
+	//TODO генерим ответ ии
+
+	//TODO записываем в бд повестование
+
+	//TODO записываем в бд варианты выборов
+
+	//TODO отправляем сообщение юзеру с вариантами ответа
+	return "", nil
 }

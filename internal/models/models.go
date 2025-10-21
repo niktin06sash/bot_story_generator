@@ -4,23 +4,31 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(command string, arg map[string]string, chatId int64) IncommingMessage {
-	return IncommingMessage{Command: command, Arguments: arg, ChatID: chatId}
+func NewIncommingMessage(data string, chatId int64) IncommingMessage {
+	return IncommingMessage{Data: data, ChatID: chatId}
 }
 
 type IncommingMessage struct {
-	Command   string
-	Arguments map[string]string
-	ChatID    int64
+	Data   string
+	ChatID int64
 }
 
-func NewOutboundMessage(chatId int64, text string) OutboundMessage {
-	return OutboundMessage{ChatID: chatId, Text: text}
+func NewOutboundMessage(chatId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
+	return OutboundMessage{ChatID: chatId, Text: text, ButtonArgs: buttonArgs}
 }
 
 type OutboundMessage struct {
-	ChatID int64
-	Text   string
+	ChatID     int64
+	Text       string
+	ButtonArgs []ButtonArg
+}
+type ButtonArg struct {
+	ButtonName string
+	Args       []string
+}
+
+func NewButtonArg(btn string, args []string) ButtonArg {
+	return ButtonArg{ButtonName: btn, Args: args}
 }
 
 // GenerateSchema генерирует JSON схему для типа T

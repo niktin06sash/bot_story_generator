@@ -5,15 +5,14 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
-	"sync"
-	"strconv"
 	"context"
-
-	"go.uber.org/zap"
+	"strings"
+	"sync"
 )
 
 type StoryService interface {
 	CreateStructuredHeroes(ctx context.Context, chatID int64) (string, error)
+	UserChoice(ctx context.Context, chatID int64, data string) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -71,67 +70,54 @@ func (r *StoryRouterImpl) routerWorker() {
 			}
 			r.userState[msg.ChatID] = true
 			r.mux.Unlock()
-			switch msg.Command {
-			case "start":
+			data := msg.Data
+			if data == "start" {
 				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
-			case "newstory":
-				//Создаем персонажа
+			} else if data == "newstory" {
 				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
 				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
 				if err != nil {
-					r.logger.ZapLogger.Error("failed to create structured heroes", zap.Error(err), zap.Int64("chat_id", msg.ChatID))
 					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorCreateHero)
 					continue
 				}
-				r.createOutboundMessage(msg.ChatID, resp)
+				r.createOutboundMessage(msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 
 				//TODO начинаем повествование
-
-			case "userChoice":
-				choiceStr := msg.Arguments["option"]
-				choiceInt, err := strconv.Atoi(choiceStr)
+			} else if strings.HasPrefix(data, "userChoice_") {
+				arg := strings.TrimPrefix(data, "userChoice_")
+				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
-					r.logger.ZapLogger.Error("invalid user choice", zap.String("choice", choiceStr), zap.Error(err), zap.Int64("chat_id", msg.ChatID))
-					r.createOutboundMessage(msg.ChatID, "Некорректный выбор опции")
+					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorUserChoice)
 					continue
 				}
-				_ = choiceInt
-
-				//TODO записывем выбор в бд
-				
-				//TODO генерим ответ ии
-
-				//TODO записываем в бд повестование
-
-				//TODO записываем в бд варианты выборов
-
-				//TODO отправляем сообщение юзеру с вариантами ответа
-
-			case "help":
+				r.createOutboundMessage(msg.ChatID, resp)
+			} else if data == "help" {
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(msg.ChatID, text)
-			default:
+			} else {
+
 			}
 		}
 	}
 }
-func (r *StoryRouterImpl) createOutboundMessage(chatID int64, text string) {
+
+func (r *StoryRouterImpl) createOutboundMessage(chatID int64, text string, butargs ...models.ButtonArg) {
 	select {
 	case <-r.ctx.Done():
 		return
-	case r.chan_outbound <- models.NewOutboundMessage(chatID, text):
+	case r.chan_outbound <- models.NewOutboundMessage(chatID, text, butargs...):
 		r.mux.Lock()
 		delete(r.userState, chatID)
 		r.mux.Unlock()
 	}
 }
-func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments map[string]string, chatID int64) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, chatID int64) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(command, arguments, chatID):
+	case r.chan_command <- models.NewIncommingMessage(data, chatID):
 	}
 }
 

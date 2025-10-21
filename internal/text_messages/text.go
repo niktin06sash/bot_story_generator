@@ -45,6 +45,9 @@ var TextErrorCreateHero = `
 Похоже, магия дала сбой.  
 Попробуй создать персонажа ещё раз чуть позже.`
 
+// надо будет поменять ответ
+var TextErrorUserChoice = `Ввел плохие данные`
+
 func TextChooseHero(heroes *models.FantasyCharacters) string {
 	resp := "🌟 *Выберите своего героя из представленных вариантов:*\n\n"
 	for idx, hero := range heroes.Characters {
