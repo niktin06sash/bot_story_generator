@@ -60,8 +60,9 @@ func main() {
 	storyService := service.NewStoryService(storyDatabase, aiB, logger)
 
 	//роутер
-	router := router.NewRouter(storyService, logger)
+	router := router.NewRouter(cfg, storyService, logger)
 	defer router.Stop()
+	router.StartRouter()
 	//бот
 	bot, err := tgbot.NewBot(cfg, logger, router)
 	if err != nil {
@@ -71,9 +72,7 @@ func main() {
 		return
 	}
 	defer bot.Stop()
-	go bot.ReadUpdateMessage()
-	go bot.SendOutboundMessage()
-	go router.Start()
+	bot.StartBot()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)

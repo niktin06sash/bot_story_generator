@@ -4,10 +4,18 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-type Message struct {
+func NewIncommingMessage(command string, arg []string, chatId int64) IncommingMessage {
+	return IncommingMessage{Command: command, Arguments: arg, ChatID: chatId}
+}
+
+type IncommingMessage struct {
 	Command   string
 	Arguments []string
 	ChatID    int64
+}
+
+func NewOutboundMessage(chatId int64, text string) OutboundMessage {
+	return OutboundMessage{ChatID: chatId, Text: text}
 }
 
 type OutboundMessage struct {

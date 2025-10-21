@@ -28,6 +28,7 @@ func NewDBObject(cfg config.DatabaseConfig, logger *logger.Logger) (*DBObject, e
 		pool.Close()
 		return nil, err
 	}
+	logger.ZapLogger.Info("Successful Postgres-connect")
 	return &DBObject{pool: pool, logger: logger}, nil
 }
 

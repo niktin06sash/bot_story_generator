@@ -19,8 +19,8 @@ func NewStoryAI(conn *AIConnection) *StoryAIImpl {
 	}
 }
 
-func (ah *StoryAIImpl) GetChatCompletion(messageHistory string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ah.conn.timeout)
+func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context, messageHistory string) (string, error) {
+	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
 	params := openai.ChatCompletionNewParams{
@@ -42,9 +42,8 @@ func (ah *StoryAIImpl) GetChatCompletion(messageHistory string) (string, error) 
 	return answer, nil
 }
 
-// GetStructuredHeroes возвращает типизированную структуру персонажей
-func (ah *StoryAIImpl) GetStructuredHeroes(messageHistory string) (*models.FantasyCharacters, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ah.conn.timeout)
+func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context, messageHistory string) (*models.FantasyCharacters, error) {
+	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
 	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{

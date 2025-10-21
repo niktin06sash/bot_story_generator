@@ -3,6 +3,7 @@ package service
 import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
+	"bot_story_generator/internal/text_messages"
 
 	"context"
 	"os"
@@ -14,8 +15,8 @@ type StoryDatabase interface {
 	//методы для базы данных(пакет repository)
 }
 type StoryAI interface {
-	GetChatCompletion(messageHistory string) (string, error)
-	GetStructuredHeroes(messageHistory string) (*models.FantasyCharacters, error)
+	GetChatCompletion(ctx context.Context, messageHistory string) (string, error)
+	GetStructuredHeroes(ctx context.Context, messageHistory string) (*models.FantasyCharacters, error)
 }
 
 type StoryServiceImpl struct {
@@ -29,7 +30,7 @@ func NewStoryService(db StoryDatabase, ai StoryAI, logger *logger.Logger) *Story
 }
 
 // CreateStructuredHeroes создает персонажей и возвращает типизированную структуру
-func (s *StoryServiceImpl) CreateStructuredHeroes(ctx context.Context, chatID int64) (*models.FantasyCharacters, bool) {
+func (s *StoryServiceImpl) CreateStructuredHeroes(ctx context.Context, chatID int64) (string, error) {
 	s.logger.ZapLogger.Info("Creating structured heroes", zap.Int64("chatID", chatID))
 
 	// Читаем данные из файла create_hero.txt
@@ -37,15 +38,15 @@ func (s *StoryServiceImpl) CreateStructuredHeroes(ctx context.Context, chatID in
 
 	if err != nil {
 		s.logger.ZapLogger.Error("failed to read promt create_hero.txt", zap.Error(err))
-		return nil, false
+		return "", err
 	}
 	promt := string(fileData)
 
-	fantasyCharacters, aiErr := s.AIStory.GetStructuredHeroes(promt)
+	fantasyCharacters, aiErr := s.AIStory.GetStructuredHeroes(ctx, promt)
 	if aiErr != nil {
 		s.logger.ZapLogger.Error("GetStructuredHeroes failed", zap.Error(aiErr))
-		return nil, false
+		return "", err
 	}
-
-	return fantasyCharacters, true
+	resp := text_messages.TextChooseHero(fantasyCharacters)
+	return resp, err
 }

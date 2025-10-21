@@ -5,6 +5,7 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"context"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -17,6 +18,8 @@ type Bot struct {
 	api         *tgbotapi.BotAPI
 	logger      *logger.Logger
 	router      StoryRouter
+	wg          *sync.WaitGroup
+	numworkers  int
 }
 type StoryRouter interface {
 	AddComand(ctx context.Context, command string, arguments []string, chatID int64)
@@ -36,7 +39,7 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 		logger.ZapLogger.Info("telegram bot debug mode is enabled")
 	}
 
-	logger.ZapLogger.Info("authorized on account " + bot.Self.UserName)
+	logger.ZapLogger.Info("Authorized on account " + bot.Self.UserName)
 	u := tgbotapi.NewUpdate(cfg.Telegram.Offset)
 	u.Timeout = cfg.Telegram.Timeout
 
@@ -49,10 +52,23 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 		logger:      logger,
 		updatesChan: updates,
 		router:      router,
+		wg:          &sync.WaitGroup{},
+		numworkers:  cfg.NumWorkers,
 	}, nil
 }
-
-func (bot *Bot) ReadUpdateMessage() {
+func (bot *Bot) StartBot() {
+	//maybe increase the number of worker-bots(field = numworkers)
+	bot.wg.Add(2)
+	go func() {
+		defer bot.wg.Done()
+		bot.readIncommingMessage()
+	}()
+	go func() {
+		defer bot.wg.Done()
+		bot.sendOutboundMessage()
+	}()
+}
+func (bot *Bot) readIncommingMessage() {
 	for {
 		select {
 		case <-bot.ctx.Done():
@@ -61,18 +77,20 @@ func (bot *Bot) ReadUpdateMessage() {
 			if !ok {
 				return
 			}
-			bot.logger.ZapLogger.Info("Received update", zap.Any("text", update.Message.Text))
-			if update.Message == nil || !update.Message.IsCommand() {
+			chatId := update.Message.Chat.ID
+			text := update.Message.Text
+			msg := update.Message
+			bot.logger.ZapLogger.Info("Received update", zap.Any("text", text))
+			if msg == nil || !msg.IsCommand() {
 				continue
 			}
-
 			command := update.Message.Command()
-			bot.router.AddComand(bot.ctx, command, nil, update.Message.Chat.ID)
+			bot.router.AddComand(bot.ctx, command, nil, chatId)
 		}
 	}
 }
 
-func (bot *Bot) SendOutboundMessage() {
+func (bot *Bot) sendOutboundMessage() {
 	outch := bot.router.GetOutboundChan()
 	for {
 		select {
@@ -82,12 +100,12 @@ func (bot *Bot) SendOutboundMessage() {
 			if !ok {
 				return
 			}
-			bot.SendMessage(outMsg.ChatID, outMsg.Text)
+			bot.sendMessage(outMsg.ChatID, outMsg.Text)
 		}
 	}
 }
 
-func (bot *Bot) SendMessage(chatID int64, text string) error {
+func (bot *Bot) sendMessage(chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, text)
 	_, err := bot.api.Send(msg)
 	if err != nil {
@@ -109,5 +127,7 @@ func (bot *Bot) SendMessage(chatID int64, text string) error {
 
 func (bot *Bot) Stop() {
 	bot.cancel()
+	bot.wg.Wait()
 	bot.router.CloseCommandChan()
+	bot.logger.ZapLogger.Info("Bot stopped")
 }

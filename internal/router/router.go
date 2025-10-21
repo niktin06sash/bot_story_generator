@@ -1,43 +1,60 @@
 package router
 
 import (
+	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
+	"sync"
 
 	"context"
-	"fmt"
-
-	"go.uber.org/zap"
 	// "go.uber.org/zap"
 )
 
 type StoryService interface {
-	CreateStructuredHeroes(ctx context.Context, chatID int64) (*models.FantasyCharacters, bool)
+	CreateStructuredHeroes(ctx context.Context, chatID int64) (string, error)
 }
 
 type StoryRouterImpl struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	service       StoryService
-	chan_command  chan models.Message
+	chan_command  chan models.IncommingMessage
 	chan_outbound chan models.OutboundMessage
 	logger        *logger.Logger
+	userState     map[int64]bool
+	mux           *sync.Mutex
+	wg            *sync.WaitGroup
+	numworkers    int
 }
 
-func NewRouter(service StoryService, logger *logger.Logger) *StoryRouterImpl {
+func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) *StoryRouterImpl {
 	context, cancel := context.WithCancel(context.Background())
-	return &StoryRouterImpl{
+	routerImpl := &StoryRouterImpl{
 		ctx:           context,
 		cancel:        cancel,
 		service:       service,
-		chan_command:  make(chan models.Message, 1000),
+		chan_command:  make(chan models.IncommingMessage, 1000),
 		chan_outbound: make(chan models.OutboundMessage, 1000),
+		userState:     make(map[int64]bool),
+		mux:           &sync.Mutex{},
 		logger:        logger,
+		wg:            &sync.WaitGroup{},
+		numworkers:    cfg.NumWorkers,
+	}
+
+	return routerImpl
+}
+func (r *StoryRouterImpl) StartRouter() {
+	r.wg.Add(r.numworkers)
+	for i := 0; i < r.numworkers; i++ {
+		go func() {
+			defer r.wg.Done()
+			r.routerWorker()
+		}()
 	}
 }
-
-func (r *StoryRouterImpl) Start() {
+func (r *StoryRouterImpl) routerWorker() {
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -46,116 +63,50 @@ func (r *StoryRouterImpl) Start() {
 			if !ok {
 				return
 			}
+			r.mux.Lock()
+			if r.userState[msg.ChatID] {
+				r.mux.Unlock()
+				continue
+			}
+			r.userState[msg.ChatID] = true
+			r.mux.Unlock()
 			switch msg.Command {
 			case "start":
-				select {
-				case <-r.ctx.Done():
-					return
-				case r.chan_outbound <- models.OutboundMessage{
-					ChatID: msg.ChatID,
-					Text:   text_messages.TextGreeting,
-				}:
-				}
+				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
 			case "newstory":
-				select {
-				case <-r.ctx.Done():
-					return
-				case r.chan_outbound <- models.OutboundMessage{
-					ChatID: msg.ChatID,
-					Text:   text_messages.TextStartCreateHero,
-				}:
-				}
-
-				heroes, ok := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
-				if !ok {
-					r.logger.ZapLogger.Error(
-						"failed to create new hero",
-						zap.Int64("chatID", msg.ChatID),
-					)
-					select {
-					case <-r.ctx.Done():
-						return
-					case r.chan_outbound <- models.OutboundMessage{
-						ChatID: msg.ChatID,
-						Text:   text_messages.TextErrorCreateHero,
-					}:
-					}
+				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
+				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
+				if err != nil {
+					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorCreateHero)
 					continue
 				}
-
-				resp := "🌟 *Выберите своего героя из представленных вариантов:*\n\n"
-				for idx, hero := range heroes.Characters {
-					resp += fmt.Sprintf("🧙‍♂️ *Персонаж #%d*\n", idx+1)
-					resp += "───────────────────────\n"
-					if hero.Name != "" {
-						resp += fmt.Sprintf("🏷️ *Имя:* %s\n", hero.Name)
-					}
-					if hero.Race != "" {
-						resp += fmt.Sprintf("🧬 *Раса:* %s\n", hero.Race)
-					}
-					if hero.Class != "" {
-						resp += fmt.Sprintf("⚔️ *Класс:* %s\n", hero.Class)
-					}
-					if hero.Appearance != "" {
-						resp += fmt.Sprintf("🪞 *Внешность:* %s\n", hero.Appearance)
-					}
-					if len(hero.Traits) > 0 {
-						resp += "💭 *Черты характера:* "
-						for i, trait := range hero.Traits {
-							if i > 0 {
-								resp += ", "
-							}
-							resp += trait
-						}
-						resp += "\n"
-					}
-					if hero.Feature != "" {
-						resp += fmt.Sprintf("✨ *Особенность:* %s\n", hero.Feature)
-					}
-					if hero.Biography != "" {
-						resp += fmt.Sprintf("📜 *Биография:* %s\n", hero.Biography)
-					}
-					if hero.Tone != "" {
-						resp += fmt.Sprintf("🎭 *Тон:* %s\n", hero.Tone)
-					}
-					resp += "\n───────────────────────\n\n"
-				}
-
-				select {
-				case <-r.ctx.Done():
-					return
-				case r.chan_outbound <- models.OutboundMessage{
-					ChatID: msg.ChatID,
-					Text:   resp,
-				}:
-				}
+				r.createOutboundMessage(msg.ChatID, resp)
 
 			case "help":
-				text := "Вот список команд:\n"
-				for _, command := range text_messages.TextCommandForHelp {
-					text += command.Command + " - " + command.Text + "\n"
-				}
-				select {
-				case <-r.ctx.Done():
-					return
-				case r.chan_outbound <- models.OutboundMessage{
-					ChatID: msg.ChatID,
-					Text:   text,
-				}:
-				}
+				text := text_messages.TextHelp()
+				r.createOutboundMessage(msg.ChatID, text)
 			default:
 			}
 		}
 	}
 }
-
+func (r *StoryRouterImpl) createOutboundMessage(chatID int64, text string) {
+	select {
+	case <-r.ctx.Done():
+		return
+	case r.chan_outbound <- models.NewOutboundMessage(chatID, text):
+		r.mux.Lock()
+		delete(r.userState, chatID)
+		r.mux.Unlock()
+	}
+}
 func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments []string, chatID int64) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.Message{Command: command, Arguments: arguments, ChatID: chatID}:
+	case r.chan_command <- models.NewIncommingMessage(command, arguments, chatID):
 	}
 }
 
@@ -169,5 +120,7 @@ func (r *StoryRouterImpl) CloseCommandChan() {
 
 func (r *StoryRouterImpl) Stop() {
 	r.cancel()
+	r.wg.Wait()
 	close(r.chan_outbound)
+	r.logger.ZapLogger.Info("Router stopped")
 }

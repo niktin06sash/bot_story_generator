@@ -10,9 +10,10 @@ import (
 )
 
 type Config struct {
-	Telegram TelegramConfig
-	AI       AIConfig
-	Database DatabaseConfig
+	Telegram   TelegramConfig
+	AI         AIConfig
+	Database   DatabaseConfig
+	NumWorkers int
 }
 type TelegramConfig struct {
 	BotToken string
@@ -75,6 +76,11 @@ func NewConfig() (*Config, error) {
 		return nil, err
 	}
 	databaseConnectUrl := os.Getenv("DATABASE_CONNECT_URL")
+	numworkers := os.Getenv("NUM_WORKERS")
+	num, err := strconv.Atoi(numworkers)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Telegram: TelegramConfig{
 			BotToken: botToken,
@@ -89,7 +95,7 @@ func NewConfig() (*Config, error) {
 		}, Database: DatabaseConfig{
 			ConnectTimeout: databasecondur,
 			URL:            databaseConnectUrl,
-		},
+		}, NumWorkers: num,
 	}
 
 	return cfg, nil
