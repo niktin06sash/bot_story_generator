@@ -6,9 +6,10 @@ import (
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"sync"
-
+	"strconv"
 	"context"
-	// "go.uber.org/zap"
+
+	"go.uber.org/zap"
 )
 
 type StoryService interface {
@@ -74,13 +75,37 @@ func (r *StoryRouterImpl) routerWorker() {
 			case "start":
 				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
 			case "newstory":
+				//Создаем персонажа
 				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
 				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
 				if err != nil {
+					r.logger.ZapLogger.Error("failed to create structured heroes", zap.Error(err), zap.Int64("chat_id", msg.ChatID))
 					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorCreateHero)
 					continue
 				}
 				r.createOutboundMessage(msg.ChatID, resp)
+
+				//TODO начинаем повествование
+
+			case "userChoice":
+				choiceStr := msg.Arguments["option"]
+				choiceInt, err := strconv.Atoi(choiceStr)
+				if err != nil {
+					r.logger.ZapLogger.Error("invalid user choice", zap.String("choice", choiceStr), zap.Error(err), zap.Int64("chat_id", msg.ChatID))
+					r.createOutboundMessage(msg.ChatID, "Некорректный выбор опции")
+					continue
+				}
+				_ = choiceInt
+
+				//TODO записывем выбор в бд
+				
+				//TODO генерим ответ ии
+
+				//TODO записываем в бд повестование
+
+				//TODO записываем в бд варианты выборов
+
+				//TODO отправляем сообщение юзеру с вариантами ответа
 
 			case "help":
 				text := text_messages.TextHelp()
@@ -100,7 +125,7 @@ func (r *StoryRouterImpl) createOutboundMessage(chatID int64, text string) {
 		r.mux.Unlock()
 	}
 }
-func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments []string, chatID int64) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, command string, arguments map[string]string, chatID int64) {
 	select {
 	case <-r.ctx.Done():
 		return

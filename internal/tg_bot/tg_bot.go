@@ -22,7 +22,7 @@ type Bot struct {
 	numworkers  int
 }
 type StoryRouter interface {
-	AddComand(ctx context.Context, command string, arguments []string, chatID int64)
+	AddComand(ctx context.Context, command string, arguments map[string]string, chatID int64)
 	GetOutboundChan() chan models.OutboundMessage
 	CloseCommandChan()
 }
@@ -81,11 +81,18 @@ func (bot *Bot) readIncommingMessage() {
 			text := update.Message.Text
 			msg := update.Message
 			bot.logger.ZapLogger.Info("Received update", zap.Any("text", text))
-			if msg == nil || !msg.IsCommand() {
+			
+			if msg.IsCommand(){
+				command := update.Message.Command()
+				bot.router.AddComand(bot.ctx, command, nil, chatId)
+				
+			} else if msg != nil {
+				if _, ok := models.PossibleAnswersToStory[msg.Text]; ok {
+					bot.router.AddComand(bot.ctx, "userChoice",map[string]string{"option": msg.Text}, chatId)
+				}
+			}else{
 				continue
 			}
-			command := update.Message.Command()
-			bot.router.AddComand(bot.ctx, command, nil, chatId)
 		}
 	}
 }

@@ -4,13 +4,13 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(command string, arg []string, chatId int64) IncommingMessage {
+func NewIncommingMessage(command string, arg map[string]string, chatId int64) IncommingMessage {
 	return IncommingMessage{Command: command, Arguments: arg, ChatID: chatId}
 }
 
 type IncommingMessage struct {
 	Command   string
-	Arguments []string
+	Arguments map[string]string
 	ChatID    int64
 }
 
@@ -55,3 +55,8 @@ type FantasyCharacters struct {
 
 // Генерируем JSON схему во время инициализации
 var FantasyCharactersResponseSchema = GenerateSchema[FantasyCharacters]()
+
+// Для проверки выбора ответа для продолжении истории
+var PossibleAnswersToStory = map[string]struct{}{
+	"1": {}, "2": {}, "3": {}, "4": {}, "5": {},
+}
