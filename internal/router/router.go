@@ -8,6 +8,9 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	//* Для будуших логов роутера
+	// "go.uber.org/zap"
 )
 
 type StoryService interface {
@@ -74,6 +77,13 @@ func (r *StoryRouterImpl) routerWorker() {
 			if data == "start" {
 				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
 			} else if data == "newstory" {
+
+
+				// ? Создаем анимацию
+				ctxLoadingAnimationCtx, cancelLoadinAnimation := context.WithCancel(context.Background())
+				_ = ctxLoadingAnimationCtx
+				// TODO Надо вызвать у бота функцию showLoadingAnimation
+
 				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
 				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
 				if err != nil {
@@ -82,12 +92,20 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				r.createOutboundMessage(msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 
+				// ? Отменем анимцию
+				cancelLoadinAnimation()
+
 				//TODO начинаем повествование
 			} else if strings.HasPrefix(data, "userChoice_") {
 				arg := strings.TrimPrefix(data, "userChoice_")
 				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
 					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorUserChoice)
+					continue
+				}
+				//* Тестовый вывод для пустого ответа
+				if resp == ""{
+					r.createOutboundMessage(msg.ChatID, "Гриша")
 					continue
 				}
 				r.createOutboundMessage(msg.ChatID, resp)

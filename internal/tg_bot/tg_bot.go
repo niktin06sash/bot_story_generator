@@ -6,6 +6,7 @@ import (
 	"bot_story_generator/internal/models"
 	"context"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -157,4 +158,65 @@ func (bot *Bot) Stop() {
 	bot.wg.Wait()
 	bot.router.CloseCommandChan()
 	bot.logger.ZapLogger.Info("Bot stopped")
+}
+
+// showLoadingAnimation — показывает меняющееся сообщение ожидания и удаляет его по завершении
+func (bot *Bot) showLoadingAnimation(ctx context.Context, chatID int64) {
+	stages := []string{
+		"🪶 Придумываю твою историю...",
+		"⚙️ Создаю героев...",
+		"📜 Переплетаю сюжетные линии...",
+		"🌌 Добавляю немного магии...",
+		"🔥 Почти готово...",
+	}
+
+	msg := tgbotapi.NewMessage(chatID, stages[0])
+	sentMsg, err := bot.api.Send(msg)
+	if err != nil {
+		bot.logger.ZapLogger.Error(
+			"failed to send loading message",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID),
+			zap.String("message", msg.Text),
+		)
+		return
+	}
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	i := 1
+	for {
+		select {
+		case <-ctx.Done():
+			// Удаляем сообщение, когда процесс завершается
+			del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+			_, err := bot.api.Send(del)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to delete loading message",
+					zap.Error(err),
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			}
+			return
+		case <-ticker.C:
+			if i >= len(stages) {
+				i = 0 // можно зациклить или остановить, как захочешь
+			}
+			edit := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, stages[i])
+			_, err := bot.api.Send(edit)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to edit loading message",
+					zap.Error(err),
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", sentMsg.MessageID),
+					zap.String("text", stages[i]),
+				)
+			}
+			i++
+		}
+	}
 }
