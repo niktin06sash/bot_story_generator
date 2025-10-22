@@ -6,7 +6,6 @@ import (
 	"bot_story_generator/internal/models"
 	"context"
 	"sync"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -118,12 +117,22 @@ func (bot *Bot) sendOutboundMessage() {
 			}
 			msg, err := bot.sendMessage(outMsg.ChatID, outMsg.Text, outMsg.ButtonArgs)
 			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to send outbound message",
+					zap.Error(err),
+					zap.Int64("chat_id", outMsg.ChatID),
+					zap.String("text", outMsg.Text),
+				)
 				continue
 			}
 			localctx := outMsg.Ctx
-			isDelete, ok := localctx.Value("delete").(string)
+			value := localctx.Value("delete")
+			if value == nil {
+				continue
+			}
+			isDelete, ok := value.(string)
 			if !ok {
-				bot.logger.ZapLogger.Error("Error while conversion to a type")
+				bot.logger.ZapLogger.Warn("Context value for 'delete' is not a string", zap.Any("value", value))
 				continue
 			}
 			if isDelete == "1" {
@@ -139,7 +148,7 @@ func (bot *Bot) sendOutboundMessage() {
 
 func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(chatID, text)
-	if butarg != nil && len(butarg) > 0 {
+	if len(butarg) > 0 {
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, btn := range butarg {
 			for _, arg := range btn.Args {
@@ -181,7 +190,7 @@ func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, ch
 	select {
 	case <-ctx.Done():
 		del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
-		_, err := bot.api.Send(del)
+		_, err := bot.api.Request(del)
 		if err != nil {
 			bot.logger.ZapLogger.Error(
 				"failed to delete loading message",
@@ -189,71 +198,14 @@ func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, ch
 				zap.Int64("chat_id", chatID),
 				zap.Int("message_id", sentMsg.MessageID),
 			)
+		} else {
+			bot.logger.ZapLogger.Info(
+				"loading message deleted successfully",
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
 		}
 	case <-bot.ctx.Done():
 		return
-	}
-
-}
-
-// showLoadingAnimation — показывает меняющееся сообщение ожидания и удаляет его по завершении
-// пока не используем, так как нужно придумать более оптимальное решение
-func (bot *Bot) showLoadingAnimation(ctx context.Context, chatID int64) {
-	stages := []string{
-		"🪶 Придумываю твою историю...",
-		"⚙️ Создаю героев...",
-		"📜 Переплетаю сюжетные линии...",
-		"🌌 Добавляю немного магии...",
-		"🔥 Почти готово...",
-	}
-
-	msg := tgbotapi.NewMessage(chatID, stages[0])
-	sentMsg, err := bot.api.Send(msg)
-	if err != nil {
-		bot.logger.ZapLogger.Error(
-			"failed to send loading message",
-			zap.Error(err),
-			zap.Int64("chat_id", chatID),
-			zap.String("message", msg.Text),
-		)
-		return
-	}
-
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	i := 1
-	for {
-		select {
-		case <-ctx.Done():
-			// Удаляем сообщение, когда процесс завершается
-			del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
-			_, err := bot.api.Send(del)
-			if err != nil {
-				bot.logger.ZapLogger.Error(
-					"failed to delete loading message",
-					zap.Error(err),
-					zap.Int64("chat_id", chatID),
-					zap.Int("message_id", sentMsg.MessageID),
-				)
-			}
-			return
-		case <-ticker.C:
-			if i >= len(stages) {
-				i = 0 // можно зациклить или остановить, как захочешь
-			}
-			edit := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, stages[i])
-			_, err := bot.api.Send(edit)
-			if err != nil {
-				bot.logger.ZapLogger.Error(
-					"failed to edit loading message",
-					zap.Error(err),
-					zap.Int64("chat_id", chatID),
-					zap.Int("message_id", sentMsg.MessageID),
-					zap.String("text", stages[i]),
-				)
-			}
-			i++
-		}
 	}
 }

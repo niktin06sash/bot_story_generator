@@ -89,7 +89,7 @@ func TextChooseHero(heroes *models.FantasyCharacters) string {
 		if hero.Tone != "" {
 			resp += fmt.Sprintf("🎭 *Тон:* %s\n", hero.Tone)
 		}
-		resp += "\n───────────────────────\n\n"
+		resp += "\n───────────────────────\n"
 	}
 	return resp
 }
