@@ -74,42 +74,44 @@ func (r *StoryRouterImpl) routerWorker() {
 			r.mux.Unlock()
 			data := msg.Data
 			if data == "start" {
-				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
+				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextGreeting)
+				r.cleanUserState(msg.ChatID)
 			} else if data == "newstory" {
-
-				// ? Создаем анимацию
-				//ctxLoadingAnimationCtx, cancelLoadinAnimation := context.WithCancel(context.Background())
-				//_ = ctxLoadingAnimationCtx
-				// TODO Надо вызвать у бота функцию showLoadingAnimation
-
-				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
+				localctx, cancel := context.WithCancel(r.ctx)
+				ctxWithValue := context.WithValue(localctx, "delete", "1")
+				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextStartCreateHero)
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
 				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
 				if err != nil {
-					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorCreateHero)
+					cancel()
+					r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextErrorCreateHero)
+					r.cleanUserState(msg.ChatID)
 					continue
 				}
-				r.createOutboundMessage(msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
-
-				// ? Отменем анимцию
-				//cancelLoadinAnimation()
+				cancel()
+				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				r.cleanUserState(msg.ChatID)
 
 				//TODO начинаем повествование
 			} else if strings.HasPrefix(data, "userChoice_") {
+				localctx, cancel := context.WithCancel(r.ctx)
+				ctxWithValue := context.WithValue(localctx, "delete", "1")
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
 				arg := strings.TrimPrefix(data, "userChoice_")
 				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
-					r.createOutboundMessage(msg.ChatID, text_messages.TextErrorUserChoice)
+					cancel()
+					r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextErrorUserChoice)
+					r.cleanUserState(msg.ChatID)
 					continue
 				}
-				//* Тестовый вывод для пустого ответа
-				if resp == "" {
-					r.createOutboundMessage(msg.ChatID, "Гриша")
-					continue
-				}
-				r.createOutboundMessage(msg.ChatID, resp)
+				cancel()
+				r.createOutboundMessage(r.ctx, msg.ChatID, resp)
+				r.cleanUserState(msg.ChatID)
 			} else if data == "help" {
 				text := text_messages.TextHelp()
-				r.createOutboundMessage(msg.ChatID, text)
+				r.createOutboundMessage(r.ctx, msg.ChatID, text)
+				r.cleanUserState(msg.ChatID)
 			} else {
 
 			}
@@ -117,15 +119,17 @@ func (r *StoryRouterImpl) routerWorker() {
 	}
 }
 
-func (r *StoryRouterImpl) createOutboundMessage(chatID int64, text string, butargs ...models.ButtonArg) {
+func (r *StoryRouterImpl) createOutboundMessage(ctx context.Context, chatID int64, text string, butargs ...models.ButtonArg) {
 	select {
 	case <-r.ctx.Done():
 		return
-	case r.chan_outbound <- models.NewOutboundMessage(chatID, text, butargs...):
-		r.mux.Lock()
-		delete(r.userState, chatID)
-		r.mux.Unlock()
+	case r.chan_outbound <- models.NewOutboundMessage(ctx, chatID, text, butargs...):
 	}
+}
+func (r *StoryRouterImpl) cleanUserState(chatID int64) {
+	r.mux.Lock()
+	delete(r.userState, chatID)
+	r.mux.Unlock()
 }
 func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, chatID int64) {
 	select {

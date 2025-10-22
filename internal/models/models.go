@@ -1,6 +1,8 @@
 package models
 
 import (
+	"context"
+
 	"github.com/invopop/jsonschema"
 )
 
@@ -13,11 +15,12 @@ type IncommingMessage struct {
 	ChatID int64
 }
 
-func NewOutboundMessage(chatId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
-	return OutboundMessage{ChatID: chatId, Text: text, ButtonArgs: buttonArgs}
+func NewOutboundMessage(ctx context.Context, chatId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
+	return OutboundMessage{Ctx: ctx, ChatID: chatId, Text: text, ButtonArgs: buttonArgs}
 }
 
 type OutboundMessage struct {
+	Ctx        context.Context
 	ChatID     int64
 	Text       string
 	ButtonArgs []ButtonArg

@@ -116,12 +116,28 @@ func (bot *Bot) sendOutboundMessage() {
 			if !ok {
 				return
 			}
-			bot.sendMessage(outMsg.ChatID, outMsg.Text, outMsg.ButtonArgs)
+			msg, err := bot.sendMessage(outMsg.ChatID, outMsg.Text, outMsg.ButtonArgs)
+			if err != nil {
+				continue
+			}
+			localctx := outMsg.Ctx
+			isDelete, ok := localctx.Value("delete").(string)
+			if !ok {
+				bot.logger.ZapLogger.Error("Error while conversion to a type")
+				continue
+			}
+			if isDelete == "1" {
+				bot.wg.Add(1)
+				go func() {
+					defer bot.wg.Done()
+					bot.waitingMessage(localctx, msg, outMsg.ChatID)
+				}()
+			}
 		}
 	}
 }
 
-func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg) error {
+func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	if butarg != nil && len(butarg) > 0 {
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -135,7 +151,7 @@ func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
 		msg.ReplyMarkup = keyboard
 	}
-	_, err := bot.api.Send(msg)
+	sentmsg, err := bot.api.Send(msg)
 	if err != nil {
 		bot.logger.ZapLogger.Error(
 			"failed to send message",
@@ -143,14 +159,15 @@ func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg
 			zap.Int64("chat_id", chatID),
 			zap.String("message", msg.Text),
 		)
-		return err
+		return sentmsg, err
 	}
 	bot.logger.ZapLogger.Info(
 		"message sent successfully",
 		zap.Int64("chat_id", chatID),
 		zap.String("message", msg.Text),
 	)
-	return nil
+
+	return sentmsg, nil
 }
 
 func (bot *Bot) Stop() {
@@ -158,6 +175,25 @@ func (bot *Bot) Stop() {
 	bot.wg.Wait()
 	bot.router.CloseCommandChan()
 	bot.logger.ZapLogger.Info("Bot stopped")
+}
+
+func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
+	select {
+	case <-ctx.Done():
+		del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+		_, err := bot.api.Send(del)
+		if err != nil {
+			bot.logger.ZapLogger.Error(
+				"failed to delete loading message",
+				zap.Error(err),
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+		}
+	case <-bot.ctx.Done():
+		return
+	}
+
 }
 
 // showLoadingAnimation — показывает меняющееся сообщение ожидания и удаляет его по завершении

@@ -15,6 +15,11 @@ var TextGreeting = `Привет! 👋
 👉 Напиши /newstory
 📜 Или /help, если хочешь узнать, как всё устроено.`
 
+var TextWaiting = `🪶 Придумываю твою историю...
+⚙️ Создаю героев...
+📜 Переплетаю сюжетные линии...
+🌌 Добавляю немного магии...`
+
 type textCommandForHelp struct {
 	Command string
 	Text    string
