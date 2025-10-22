@@ -8,7 +8,6 @@ import (
 	"context"
 	"strings"
 	"sync"
-
 	//* Для будуших логов роутера
 	// "go.uber.org/zap"
 )
@@ -78,10 +77,9 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(msg.ChatID, text_messages.TextGreeting)
 			} else if data == "newstory" {
 
-
 				// ? Создаем анимацию
-				ctxLoadingAnimationCtx, cancelLoadinAnimation := context.WithCancel(context.Background())
-				_ = ctxLoadingAnimationCtx
+				//ctxLoadingAnimationCtx, cancelLoadinAnimation := context.WithCancel(context.Background())
+				//_ = ctxLoadingAnimationCtx
 				// TODO Надо вызвать у бота функцию showLoadingAnimation
 
 				r.createOutboundMessage(msg.ChatID, text_messages.TextStartCreateHero)
@@ -93,7 +91,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 
 				// ? Отменем анимцию
-				cancelLoadinAnimation()
+				//cancelLoadinAnimation()
 
 				//TODO начинаем повествование
 			} else if strings.HasPrefix(data, "userChoice_") {
@@ -104,7 +102,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				//* Тестовый вывод для пустого ответа
-				if resp == ""{
+				if resp == "" {
 					r.createOutboundMessage(msg.ChatID, "Гриша")
 					continue
 				}

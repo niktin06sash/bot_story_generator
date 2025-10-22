@@ -161,6 +161,7 @@ func (bot *Bot) Stop() {
 }
 
 // showLoadingAnimation — показывает меняющееся сообщение ожидания и удаляет его по завершении
+// пока не используем, так как нужно придумать более оптимальное решение
 func (bot *Bot) showLoadingAnimation(ctx context.Context, chatID int64) {
 	stages := []string{
 		"🪶 Придумываю твою историю...",

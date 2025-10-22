@@ -1,0 +1,5 @@
+CREATE TABLE users (
+    ID   BIGINT PRIMARY KEY,  
+    chatID   BIGINT NOT NULL UNIQUE,
+    isSub    BOOLEAN DEFAULT FALSE
+);
