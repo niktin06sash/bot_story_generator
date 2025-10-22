@@ -15,11 +15,6 @@ var TextGreeting = `Привет! 👋
 👉 Напиши /newstory
 📜 Или /help, если хочешь узнать, как всё устроено.`
 
-var TextWaiting = `🪶 Придумываю твою историю...
-⚙️ Создаю героев...
-📜 Переплетаю сюжетные линии...
-🌌 Добавляю немного магии...`
-
 type textCommandForHelp struct {
 	Command string
 	Text    string
@@ -54,24 +49,25 @@ var TextErrorCreateHero = `
 var TextErrorUserChoice = `Ввел плохие данные`
 
 func TextChooseHero(heroes *models.FantasyCharacters) string {
-	resp := "🌟 *Выберите своего героя из представленных вариантов:*\n\n"
+	resp := "🌟 Выберите своего героя из представленных вариантов:\n"
+	resp += "───────────────────────\n"
 	for idx, hero := range heroes.Characters {
-		resp += fmt.Sprintf("🧙‍♂️ *Персонаж #%d*\n", idx+1)
+		resp += fmt.Sprintf("🧙‍♂️ Персонаж #%d\n", idx+1)
 		resp += "───────────────────────\n"
 		if hero.Name != "" {
-			resp += fmt.Sprintf("🏷️ *Имя:* %s\n", hero.Name)
+			resp += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
 		}
 		if hero.Race != "" {
-			resp += fmt.Sprintf("🧬 *Раса:* %s\n", hero.Race)
+			resp += fmt.Sprintf("🧬 Раса: %s\n", hero.Race)
 		}
 		if hero.Class != "" {
-			resp += fmt.Sprintf("⚔️ *Класс:* %s\n", hero.Class)
+			resp += fmt.Sprintf("⚔️ Класс: %s\n", hero.Class)
 		}
 		if hero.Appearance != "" {
-			resp += fmt.Sprintf("🪞 *Внешность:* %s\n", hero.Appearance)
+			resp += fmt.Sprintf("🪞 Внешность: %s\n", hero.Appearance)
 		}
 		if len(hero.Traits) > 0 {
-			resp += "💭 *Черты характера:* "
+			resp += "💭 Черты характера: "
 			for i, trait := range hero.Traits {
 				if i > 0 {
 					resp += ", "
@@ -81,15 +77,15 @@ func TextChooseHero(heroes *models.FantasyCharacters) string {
 			resp += "\n"
 		}
 		if hero.Feature != "" {
-			resp += fmt.Sprintf("✨ *Особенность:* %s\n", hero.Feature)
+			resp += fmt.Sprintf("✨ Особенность: %s\n", hero.Feature)
 		}
 		if hero.Biography != "" {
-			resp += fmt.Sprintf("📜 *Биография:* %s\n", hero.Biography)
+			resp += fmt.Sprintf("📜 Биография: %s\n", hero.Biography)
 		}
 		if hero.Tone != "" {
-			resp += fmt.Sprintf("🎭 *Тон:* %s\n", hero.Tone)
+			resp += fmt.Sprintf("🎭 Тон: %s\n", hero.Tone)
 		}
-		resp += "\n───────────────────────\n"
+		resp += "───────────────────────\n"
 	}
 	return resp
 }
@@ -99,4 +95,38 @@ func TextHelp() string {
 		text += command.Command + " - " + command.Text + "\n"
 	}
 	return text
+}
+
+var TextWaiting = `🪶 Придумываю твою историю...
+⚙️ Создаю героев...
+📜 Переплетаю сюжетные линии...
+🌌 Добавляю немного магии...`
+
+var WaitingTextHeroes = []string{
+	"🪶 Придумываю твою историю...",
+	"⚙️ Создаю героев...",
+	"📜 Переплетаю сюжетные линии...",
+	"🌌 Добавляю немного магии...",
+}
+
+var WaitingTextNarrative = []string{
+	"⚔️ Герои собираются с духом перед новым испытанием...",
+	"🛡 Судьба взвешивает твой следующий шаг...",
+	"🌪 Ветры перемен кружат над полем сражения...",
+	"🔥 Клинки звенят, готовясь к решающему удару...",
+	"🌄 Рассвет уже близко — история ждёт продолжения...",
+}
+
+func TextNarrativeWithChoices(narrative string, choices []string) string {
+	resp := ""
+	if narrative != "" {
+		resp += fmt.Sprintf("🧭 Развитие событий:\n%s\n\n", narrative)
+	}
+	if len(choices) > 0 {
+		resp += "⚡ Выбор действий:\n"
+		for i, choice := range choices {
+			resp += fmt.Sprintf("%d️⃣ %s\n", i+1, choice)
+		}
+	}
+	return resp
 }

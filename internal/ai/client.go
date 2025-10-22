@@ -81,3 +81,44 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context, messageHistor
 
 	return &fantasyCharacters, nil
 }
+
+func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, messageHistory string) (*models.StoryNode, error) {
+	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
+	defer cancel()
+
+	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
+		Name:        "story_segment",
+		Description: openai.String("Повествование + варианты ответов"),
+		Schema:      models.StoryScriptResponseSchema,
+		Strict:      openai.Bool(true),
+	}
+
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel(ah.conn.model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(""),
+			openai.UserMessage(messageHistory),
+		},
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: schemaParam,
+			},
+		},
+	}
+
+	resp, err := ah.conn.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return nil, nil
+	}
+
+	var StoryNode models.StoryNode
+	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &StoryNode); err != nil {
+		return nil, err
+	}
+
+	return &StoryNode, nil
+	
+}

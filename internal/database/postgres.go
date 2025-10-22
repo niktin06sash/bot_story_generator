@@ -29,15 +29,15 @@ func NewDBObject(cfg config.DatabaseConfig, logger *logger.Logger) (*DBObject, e
 		return nil, err
 	}
 	logger.ZapLogger.Info("Successful Postgres-connect")
-	return &DBObject{pool: pool, logger: logger}, nil
+	return &DBObject{Pool: pool, logger: logger}, nil
 }
 
 type DBObject struct {
 	logger *logger.Logger
-	pool   *pgxpool.Pool
+	Pool   *pgxpool.Pool
 }
 
 func (db *DBObject) Close() {
-	db.pool.Close()
+	db.Pool.Close()
 	db.logger.ZapLogger.Info("Successful close Postgres-connect")
 }

@@ -15,6 +15,8 @@ import (
 type StoryService interface {
 	CreateStructuredHeroes(ctx context.Context, chatID int64) (string, error)
 	UserChoice(ctx context.Context, chatID int64, data string) (string, error)
+	
+	CreateUser(ctx context.Context, chatID int64, isSub bool) error
 }
 
 type StoryRouterImpl struct {
@@ -76,11 +78,20 @@ func (r *StoryRouterImpl) routerWorker() {
 			if data == "start" {
 				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextGreeting)
 				r.cleanUserState(msg.ChatID)
+
+				err := r.service.CreateUser(r.ctx, msg.ChatID, false)
+				if err != nil{
+					//! НУ ТУТ ОПАСНО, ЧЕ ТО ДЕЛАТЬ НАДО РАЗ ЮЗЕРА НЕ CОЗДАЛСЯ
+				}
+
 			} else if data == "newstory" {
 				localctx, cancel := context.WithCancel(r.ctx)
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextStartCreateHero)
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
+				//* Старая версия
+				// r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
+				//? Новая версия
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextHeroes[0])
 				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
 				if err != nil {
 					cancel()
@@ -92,11 +103,13 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(msg.ChatID)
 
-				//TODO начинаем повествование
 			} else if strings.HasPrefix(data, "userChoice_") {
 				localctx, cancel := context.WithCancel(r.ctx)
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
+				//* Старая версия
+				// r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
+				//? Новая версия
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextNarrative[0])
 				arg := strings.TrimPrefix(data, "userChoice_")
 				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
@@ -106,12 +119,14 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				cancel()
-				r.createOutboundMessage(r.ctx, msg.ChatID, resp)
+				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(msg.ChatID)
+
 			} else if data == "help" {
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(r.ctx, msg.ChatID, text)
 				r.cleanUserState(msg.ChatID)
+
 			} else {
 
 			}

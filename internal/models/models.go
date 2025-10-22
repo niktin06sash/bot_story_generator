@@ -49,8 +49,8 @@ func GenerateSchema[T any]() interface{} {
 
 // Hero представляет фэнтезийного персонажа
 type Hero struct {
-	Name       string   `json:"name" jsonschema_description:"Имя персонажа, подходящее для фэнтези-сеттинга (короткое/запоминающееся)" jsonschema:"minLength=1,maxLength=20"`
-	Race       string   `json:"race" jsonschema_description:"Раса (например: человек, эльф, орк, драконорожденный и т.п.)" jsonschema:"minLength=1,maxLength=40"`
+	Name       string   `json:"name" jsonschema_description:"Имя персонажа, подходящее для фэнтези-сеттинга (короткое/запоминающееся)" jsonschema:"minLength=1,maxLength=40"`
+	Race       string   `json:"race" jsonschema_description:"Раса (например: человек, эльф, орк, драконорожденный и т.п.)" jsonschema:"minLength=1,maxLength=50"`
 	Class      string   `json:"class" jsonschema_description:"Класс или профессия (маг, воин, охотник, некромант и т. д.)" jsonschema:"minLength=1,maxLength=50"`
 	Appearance string   `json:"appearance" jsonschema_description:"Краткое описание внешности (2–3 предложения)" jsonschema:"minLength=20,maxLength=250"`
 	Traits     []string `json:"traits" jsonschema_description:"Основные черты характера (2–3 пункта)" jsonschema:"minItems=2,maxItems=3"`
@@ -70,4 +70,18 @@ var FantasyCharactersResponseSchema = GenerateSchema[FantasyCharacters]()
 // Для проверки выбора ответа для продолжении истории
 var PossibleAnswersToStory = map[string]struct{}{
 	"1": {}, "2": {}, "3": {}, "4": {}, "5": {},
+}
+
+// StoryNode представляет один элемент повествования с вариантами реакции
+type StoryNode struct {
+	Narrative string   `json:"narrative" jsonschema_description:"Дальнейшее развитие событий" jsonschema:"minLength=500,maxLength=2200"`
+	Choices   []string `json:"choices" jsonschema_description:"Пять вариантов действия героя, реагирующих на повествование" jsonschema:"minItems=5,maxItems=5"`
+}
+
+// Генерируем JSON схему во время инициализации
+var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
+
+// Story хранит все сегменты истории для текущей игровой сессии
+type AllStorySegments struct{
+	StorySegments []string
 }

@@ -4,8 +4,10 @@ import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
+	"bot_story_generator/internal/text_messages"
 	"context"
 	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"go.uber.org/zap"
@@ -139,7 +141,10 @@ func (bot *Bot) sendOutboundMessage() {
 				bot.wg.Add(1)
 				go func() {
 					defer bot.wg.Done()
-					bot.waitingMessage(localctx, msg, outMsg.ChatID)
+					//* Старая версия
+					// bot.waitingMessage(localctx, msg, outMsg.ChatID)
+					//? Новая версия
+					bot.waitingMessageWithAnimation(localctx, msg, outMsg.ChatID)
 				}()
 			}
 		}
@@ -186,6 +191,7 @@ func (bot *Bot) Stop() {
 	bot.logger.ZapLogger.Info("Bot stopped")
 }
 
+// СТАРАЯ ВЕРСИЯ
 func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
 	select {
 	case <-ctx.Done():
@@ -207,5 +213,68 @@ func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, ch
 		}
 	case <-bot.ctx.Done():
 		return
+	}
+}
+
+// НОВАЯ ВЕРСИЯ (вспомогательная функция)
+func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
+	currentIdx := 1
+	//TODO добавить выбор текста
+	waitTexts := text_messages.WaitingTextHeroes
+
+	bot.logger.ZapLogger.Info(
+		"Starting waitingMessageWithAnimation",
+		zap.Int64("chat_id", chatID),
+		zap.Int("message_id", sentMsg.MessageID),
+	)
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			bot.logger.ZapLogger.Info(
+				"context cancelled, deleting loading message",
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+			del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+			_, err := bot.api.Request(del)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to delete loading message",
+					zap.Error(err),
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			} else {
+				bot.logger.ZapLogger.Info(
+					"loading message deleted successfully",
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			}
+			return
+		case <-bot.ctx.Done():
+			bot.logger.ZapLogger.Info(
+				"bot context cancelled",
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+			return
+		case <-ticker.C:
+			editMsg := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, waitTexts[currentIdx])
+			_, err := bot.api.Send(editMsg)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to update waiting message",
+					zap.Error(err),
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			}
+			currentIdx = (currentIdx + 1) % len(waitTexts)
+		}
 	}
 }
