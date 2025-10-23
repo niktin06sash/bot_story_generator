@@ -19,7 +19,7 @@ func NewStoryAI(conn *AIConnection) *StoryAIImpl {
 	}
 }
 
-func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context, messageHistory string) (string, error) {
+func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
@@ -27,7 +27,7 @@ func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context, messageHistory 
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(messageHistory),
+			openai.UserMessage(ah.conn.promt),
 		},
 	}
 
@@ -42,7 +42,7 @@ func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context, messageHistory 
 	return answer, nil
 }
 
-func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context, messageHistory string) (*models.FantasyCharacters, error) {
+func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.FantasyCharacters, error) {
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
@@ -57,7 +57,7 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context, messageHistor
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(messageHistory),
+			openai.UserMessage(ah.conn.promt),
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
@@ -82,7 +82,7 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context, messageHistor
 	return &fantasyCharacters, nil
 }
 
-func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, messageHistory string) (*models.StoryNode, error) {
+func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, currentData string) (*models.StoryNode, error) {
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
@@ -97,7 +97,7 @@ func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, messageH
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(messageHistory),
+			openai.UserMessage(ah.conn.promt + currentData),
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
@@ -120,5 +120,5 @@ func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, messageH
 	}
 
 	return &StoryNode, nil
-	
+
 }

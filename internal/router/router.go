@@ -13,10 +13,9 @@ import (
 )
 
 type StoryService interface {
-	CreateStructuredHeroes(ctx context.Context, chatID int64) (string, error)
+	CreateStory(ctx context.Context, chatID, userID int64) (string, error)
 	UserChoice(ctx context.Context, chatID int64, data string) (string, error)
-	
-	CreateUser(ctx context.Context, chatID int64, isSub bool) error
+	CreateUser(ctx context.Context, chatID int64, userID int64) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -76,26 +75,19 @@ func (r *StoryRouterImpl) routerWorker() {
 			r.mux.Unlock()
 			data := msg.Data
 			if data == "start" {
-				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextGreeting)
+				resp, _ := r.service.CreateUser(r.ctx, msg.ChatID, msg.UserID)
+				r.createOutboundMessage(r.ctx, msg.ChatID, resp)
 				r.cleanUserState(msg.ChatID)
-
-				err := r.service.CreateUser(r.ctx, msg.ChatID, false)
-				if err != nil{
-					//! НУ ТУТ ОПАСНО, ЧЕ ТО ДЕЛАТЬ НАДО РАЗ ЮЗЕРА НЕ CОЗДАЛСЯ
-				}
-
 			} else if data == "newstory" {
 				localctx, cancel := context.WithCancel(r.ctx)
+				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextStartCreateHero)
-				//* Старая версия
-				// r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
-				//? Новая версия
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextHeroes[0])
-				resp, err := r.service.CreateStructuredHeroes(r.ctx, msg.ChatID)
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextHeroes)
+				resp, err := r.service.CreateStory(r.ctx, msg.ChatID, msg.UserID)
 				if err != nil {
 					cancel()
-					r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextErrorCreateHero)
+					r.createOutboundMessage(r.ctx, msg.ChatID, resp)
 					r.cleanUserState(msg.ChatID)
 					continue
 				}
@@ -105,16 +97,14 @@ func (r *StoryRouterImpl) routerWorker() {
 
 			} else if strings.HasPrefix(data, "userChoice_") {
 				localctx, cancel := context.WithCancel(r.ctx)
+				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				//* Старая версия
-				// r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.TextWaiting)
-				//? Новая версия
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextNarrative[0])
+				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
 				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
 					cancel()
-					r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextErrorUserChoice)
+					r.createOutboundMessage(r.ctx, msg.ChatID, resp)
 					r.cleanUserState(msg.ChatID)
 					continue
 				}
@@ -126,7 +116,6 @@ func (r *StoryRouterImpl) routerWorker() {
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(r.ctx, msg.ChatID, text)
 				r.cleanUserState(msg.ChatID)
-
 			} else {
 
 			}
@@ -146,13 +135,13 @@ func (r *StoryRouterImpl) cleanUserState(chatID int64) {
 	delete(r.userState, chatID)
 	r.mux.Unlock()
 }
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, chatID int64) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, chatID int64, userID int64) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(data, chatID):
+	case r.chan_command <- models.NewIncommingMessage(data, chatID, userID):
 	}
 }
 

@@ -1,7 +1,7 @@
 CREATE TABLE stories (
     ID   SERIAL PRIMARY KEY,
     userID     BIGINT NOT NULL,
-    data  JSONB NOT NULL,
+    data       JSONB,
     createdAt  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     isActive   BOOLEAN DEFAULT TRUE,
 

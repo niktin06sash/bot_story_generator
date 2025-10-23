@@ -6,13 +6,14 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, chatId int64) IncommingMessage {
-	return IncommingMessage{Data: data, ChatID: chatId}
+func NewIncommingMessage(data string, chatId int64, userID int64) IncommingMessage {
+	return IncommingMessage{Data: data, ChatID: chatId, UserID: userID}
 }
 
 type IncommingMessage struct {
 	Data   string
 	ChatID int64
+	UserID int64
 }
 
 func NewOutboundMessage(ctx context.Context, chatId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
@@ -82,6 +83,6 @@ type StoryNode struct {
 var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
 
 // Story хранит все сегменты истории для текущей игровой сессии
-type AllStorySegments struct{
+type AllStorySegments struct {
 	StorySegments []string
 }

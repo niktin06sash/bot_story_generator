@@ -4,8 +4,8 @@ import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
-	"bot_story_generator/internal/text_messages"
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +24,7 @@ type Bot struct {
 	numworkers  int
 }
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, chatID int64)
+	AddComand(ctx context.Context, data string, chatID int64, userID int64)
 	GetOutboundChan() chan models.OutboundMessage
 	CloseCommandChan()
 }
@@ -82,8 +82,9 @@ func (bot *Bot) readIncommingMessage() {
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
 				chatID := update.CallbackQuery.Message.Chat.ID
-				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data))
-				bot.router.AddComand(bot.ctx, data, chatID)
+				userID := update.CallbackQuery.From.ID
+				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID), zap.Any("chatID", chatID))
+				bot.router.AddComand(bot.ctx, data, chatID, userID)
 				//после нажатия на кнопку выбора она исчезает с экрана(надо тестить и проверять как это отображается)
 				edit := tgbotapi.NewEditMessageReplyMarkup(
 					chatID,
@@ -94,13 +95,14 @@ func (bot *Bot) readIncommingMessage() {
 				callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 				bot.api.Request(callback)
 			} else if update.Message != nil {
-				chatId := update.Message.Chat.ID
+				chatID := update.Message.Chat.ID
 				text := update.Message.Text
 				msg := update.Message
+				userID := update.Message.From.ID
 				if msg.IsCommand() {
-					bot.logger.ZapLogger.Info("Received update", zap.Any("text", text))
+					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID), zap.Any("chatID", chatID))
 					command := update.Message.Command()
-					bot.router.AddComand(bot.ctx, command, chatId)
+					bot.router.AddComand(bot.ctx, command, chatID, userID)
 				}
 			}
 		}
@@ -117,7 +119,17 @@ func (bot *Bot) sendOutboundMessage() {
 			if !ok {
 				return
 			}
-			msg, err := bot.sendMessage(outMsg.ChatID, outMsg.Text, outMsg.ButtonArgs)
+			var text []string
+			if strings.Contains(outMsg.Text, "---") {
+				parts := strings.Split(outMsg.Text, "---")
+				for i := range parts {
+					parts[i] = strings.TrimSpace(parts[i])
+				}
+				text = parts
+			} else {
+				text = []string{strings.TrimSpace(outMsg.Text)}
+			}
+			msg, err := bot.sendMessage(outMsg.ChatID, text[0], outMsg.ButtonArgs)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
 					"failed to send outbound message",
@@ -127,6 +139,7 @@ func (bot *Bot) sendOutboundMessage() {
 				)
 				continue
 			}
+			//*опционально в будущем придумать логику для выбора разных значений контекста
 			localctx := outMsg.Ctx
 			value := localctx.Value("delete")
 			if value == nil {
@@ -141,10 +154,7 @@ func (bot *Bot) sendOutboundMessage() {
 				bot.wg.Add(1)
 				go func() {
 					defer bot.wg.Done()
-					//* Старая версия
-					// bot.waitingMessage(localctx, msg, outMsg.ChatID)
-					//? Новая версия
-					bot.waitingMessageWithAnimation(localctx, msg, outMsg.ChatID)
+					bot.waitingMessageWithAnimation(localctx, msg, outMsg.ChatID, text)
 				}()
 			}
 		}
@@ -184,53 +194,19 @@ func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg
 	return sentmsg, nil
 }
 
-func (bot *Bot) Stop() {
-	bot.cancel()
-	bot.wg.Wait()
-	bot.router.CloseCommandChan()
-	bot.logger.ZapLogger.Info("Bot stopped")
-}
-
-// СТАРАЯ ВЕРСИЯ
-func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
-	select {
-	case <-ctx.Done():
-		del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
-		_, err := bot.api.Request(del)
-		if err != nil {
-			bot.logger.ZapLogger.Error(
-				"failed to delete loading message",
-				zap.Error(err),
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
-		} else {
-			bot.logger.ZapLogger.Info(
-				"loading message deleted successfully",
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
-		}
-	case <-bot.ctx.Done():
-		return
-	}
-}
-
-// НОВАЯ ВЕРСИЯ (вспомогательная функция)
-func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
+// НОВАЯ ВЕРСИЯ
+func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, chatID int64, inputText []string) {
 	currentIdx := 1
-	//TODO добавить выбор текста
-	waitTexts := text_messages.WaitingTextHeroes
-
+	if len(inputText) == 1 {
+		currentIdx = 0
+	}
 	bot.logger.ZapLogger.Info(
 		"Starting waitingMessageWithAnimation",
 		zap.Int64("chat_id", chatID),
 		zap.Int("message_id", sentMsg.MessageID),
 	)
-
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -257,14 +233,9 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 			}
 			return
 		case <-bot.ctx.Done():
-			bot.logger.ZapLogger.Info(
-				"bot context cancelled",
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
 			return
 		case <-ticker.C:
-			editMsg := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, waitTexts[currentIdx])
+			editMsg := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, inputText[currentIdx])
 			_, err := bot.api.Send(editMsg)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
@@ -274,7 +245,38 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 					zap.Int("message_id", sentMsg.MessageID),
 				)
 			}
-			currentIdx = (currentIdx + 1) % len(waitTexts)
+			currentIdx = (currentIdx + 1) % len(inputText)
 		}
 	}
+}
+
+// СТАРАЯ ВЕРСИЯ
+func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
+	select {
+	case <-ctx.Done():
+		del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+		_, err := bot.api.Request(del)
+		if err != nil {
+			bot.logger.ZapLogger.Error(
+				"failed to delete loading message",
+				zap.Error(err),
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+		} else {
+			bot.logger.ZapLogger.Info(
+				"loading message deleted successfully",
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+		}
+	case <-bot.ctx.Done():
+		return
+	}
+}
+func (bot *Bot) Stop() {
+	bot.cancel()
+	bot.wg.Wait()
+	bot.router.CloseCommandChan()
+	bot.logger.ZapLogger.Info("Bot stopped")
 }
