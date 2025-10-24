@@ -40,7 +40,7 @@ func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) erro
 	return nil
 }
 
-func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) error {
+func (s *StoryDatabaseImpl) CheckActiveStories(ctx context.Context, userID int64) error {
 	query := `
     	SELECT u.ID, COUNT(s.ID) AS count_active_story
     	FROM users u
