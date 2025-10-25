@@ -25,6 +25,7 @@ type StoryDatabase interface {
 	CheckActiveStories(ctx context.Context, userID int64) error
 	AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error)
 	AddVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error
+	GetVariants(ctx context.Context, storyID int) (*models.StoryVariant, error)
 	GetAllStorySegments(ctx context.Context, chatID int64) (*models.AllStorySegments, error)
 }
 type StoryAI interface {
@@ -43,89 +44,105 @@ func NewStoryService(db StoryDatabase, ai StoryAI, logger *logger.Logger) *Story
 	return &StoryServiceImpl{DBStory: db, AIStory: ai, Logger: logger}
 }
 
-func (s *StoryServiceImpl) CreateStory(ctx context.Context, chatID int64, userID int64) (string, error) {
+func (s *StoryServiceImpl) CreateStory(ctx context.Context, chatID int64, userID int64) ([]string, error) {
 	s.Logger.ZapLogger.Info("Creating new story", zap.Any("chatID", chatID), zap.Any("userID", userID))
-	//проверяем нет ли активных историй у пользователя в данный момент
+	// Проверяем, нет ли активных историй у пользователя в данный момент
 	err := s.DBStory.CheckActiveStories(ctx, userID)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "client: ") {
 			s.Logger.ZapLogger.Warn("Client error", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-			return text_messages.TextErrorUserActiveStory, err
+			return []string{text_messages.TextErrorUserActiveStory}, err
 		}
 		s.Logger.ZapLogger.Error("Server error", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
-	//запрос в ии
+	// Запрос в ИИ
 	fantasyCharacters, err := s.AIStory.GetStructuredHeroes(ctx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetStructuredHeroes failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
 	data, err := json.Marshal(fantasyCharacters)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Marshal failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
-	//создание транзакции для консистентности данных
+	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
 	story := models.NewStory(userID, nil)
-	//создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
+	// Создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
 	storyId, err := s.DBStory.AddStory(ctx, tx, story)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddStory failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		err := s.DBStory.RollbackTx(ctx, tx)
-		if err != nil {
-			s.Logger.ZapLogger.Error("RollbackTx failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx failed", zap.Error(rollbackErr), zap.Any("chatID", chatID), zap.Any("userID", userID))
 		}
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
 	variant := models.NewStoryVariant(storyId, data)
-	//создаем начальный вариант с данными из ии
+	// Создаем начальный вариант с данными из ИИ
 	err = s.DBStory.AddVariant(ctx, tx, variant)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddVariant failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		err := s.DBStory.RollbackTx(ctx, tx)
-		if err != nil {
-			s.Logger.ZapLogger.Error("RollbackTx failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx failed", zap.Error(rollbackErr), zap.Any("chatID", chatID), zap.Any("userID", userID))
 		}
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
-	//делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты)
+	// Делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты)
 	err = s.DBStory.CommitTx(ctx, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx failed", zap.Error(err), zap.Any("chatID", chatID), zap.Any("userID", userID))
-		return text_messages.TextErrorCreateTask, err
+		return []string{text_messages.TextErrorCreateTask}, err
 	}
 	s.Logger.ZapLogger.Info("Story created successfully", zap.Any("chatID", chatID), zap.Any("userID", userID))
-	return text_messages.TextChooseHero(fantasyCharacters), nil
+	return text_messages.NewChouseHero(fantasyCharacters), nil
 }
-func (s *StoryServiceImpl) UserChoice(ctx context.Context, chatID int64, data string) (string, error) {
+
+func (s *StoryServiceImpl) UserChoice(ctx context.Context, chatID int64, data string) (string, string, error) {
 	//TODO добавить проверку на токены и сделать что то с тем,
 	//TODO что если токенов нет будет, но юзер сделает выбор, то кнопки пропадут
-	//можно убирать кнопки только после успешного исполнения задачи
-	//если даже на кнопку нажали повторно, то мьютекс заблочит задачу из первого нажатия и будет скипать последующие
-	//будто бы контекстом с ключом так же сообщить боту, но все упирается в айди сообщения телеграм
+	//TODO можно убирать кнопки только после успешного исполнения задачи
+	//TODO если даже на кнопку нажали повторно, то мьютекс заблочит задачу из первого нажатия и будет скипать последующие
+	//TODO будто бы контекстом с ключом так же сообщить боту, но все упирается в айди сообщения телеграм
 	s.Logger.ZapLogger.Info("User made a choice", zap.Int64("chatID", chatID), zap.String("choice", data))
 	number_choise, err := strconv.Atoi(data)
 	if err != nil {
 		s.Logger.ZapLogger.Error("invalid user choice", zap.String("choice", data), zap.Error(err), zap.Int64("chat_id", chatID))
-		return "", err
+		return "", "", err
 	}
-	_ = number_choise
 
-	//TODO выводим выбор юзера
+	//* Получаем варианты выбора пользователя
+	variant, dbErr := s.DBStory.GetVariants(ctx, int(chatID))
+	if dbErr != nil {
+		s.Logger.ZapLogger.Error("GetVariants failed", zap.Error(dbErr), zap.Int64("chatID", chatID))
+		return "", "", dbErr
+	}
+	//TODO определить, что получаем - fantasyCharactres или storyVariants
+	var fantasyCharacters models.FantasyCharacters
+	err = json.Unmarshal(variant.Data, &fantasyCharacters)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to unmarshal fantasy characters", zap.Error(err), zap.Int64("chatID", chatID))
+		return "", "", err
+	}
+	userVariant := fantasyCharacters.Characters[number_choise]
+	s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variants", userVariant), zap.Int64("chatID", chatID))
 
 	//TODO записывем выбор в бд
 
 	//TODO генерим ответ ии - вынести в другую функцию потом
 
+	// Генерируем ответ ии
 	allStory, dbErr := s.DBStory.GetAllStorySegments(ctx, chatID)
 	if dbErr != nil {
-		//TODO обработать
+		s.Logger.ZapLogger.Error("Failed to get all story segments", zap.Error(dbErr), zap.Int64("chatID", chatID))
+		// You may want to return here or handle the error appropriately
 	}
 	fullStory := ""
 	for _, segment := range allStory.StorySegments {
@@ -133,10 +150,13 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, chatID int64, data st
 	}
 	segment, aiErr := s.AIStory.GenerateNextStorySegment(ctx, fullStory)
 	if aiErr != nil {
-		//TODO обработать
+		s.Logger.ZapLogger.Error("AI failed to generate next story segment", zap.Error(aiErr), zap.Int64("chatID", chatID))
+		// You may want to return here or handle the error appropriately
 	}
 	narrative := segment.Narrative
 	choise := segment.Choices
+
+	s.Logger.ZapLogger.Info("Generated next segment", zap.String("narrative", narrative), zap.Any("choices", choise), zap.Int64("chatID", chatID))
 
 	//TODO записываем в бд повестование
 
@@ -145,7 +165,9 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, chatID int64, data st
 	//TODO отправляем сообщение юзеру с вариантами ответа
 
 	resp := text_messages.TextNarrativeWithChoices(narrative, choise)
-	return resp, nil
+	//TODO сделать выбор вывода героя или истории
+	user_variant := text_messages.FormatHeroDescription(userVariant)
+	return resp, user_variant, nil
 }
 
 func (s *StoryServiceImpl) CreateUser(ctx context.Context, chatID int64, userID int64) (string, error) {

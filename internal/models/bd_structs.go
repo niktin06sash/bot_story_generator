@@ -14,6 +14,7 @@ func NewUser(chatID int64, userID int64) *User {
 	return &User{
 		ID:     userID,
 		ChatID: chatID,
+		IsSub:  false,
 	}
 }
 

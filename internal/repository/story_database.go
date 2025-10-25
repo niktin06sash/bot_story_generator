@@ -20,8 +20,8 @@ func NewStoryDatabase(db *database.DBObject) *StoryDatabaseImpl {
 }
 func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) error {
 	query := `
-		INSERT INTO users (ID, chatID)
-		VALUES ($1, $2)
+		INSERT INTO users (ID, chatID, isSub)
+		VALUES ($1, $2, $3)
 		ON CONFLICT(ID) DO NOTHING RETURNING ID 
 	`
 	_, err := s.databaseclient.Pool.Exec(
@@ -55,7 +55,7 @@ func (s *StoryDatabaseImpl) CheckActiveStories(ctx context.Context, userID int64
 	)
 	var scanuserID int64
 	var countActive int64
-	err := row.Scan(&userID, &countActive)
+	err := row.Scan(&scanuserID, &countActive)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}
@@ -98,6 +98,32 @@ func (s *StoryDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant *
 		return fmt.Errorf("server: database error: %w", err)
 	}
 	return nil
+}
+
+func (s *StoryDatabaseImpl) GetVariants(ctx context.Context, chat_id int) (*models.StoryVariant, error) {
+	query := `
+		SELECT sv.storyid, sv.data
+		FROM storiesVariants sv
+		INNER JOIN stories s ON sv.storyid = s.id
+		WHERE s.userid = $1 and s.isactive = true
+	`
+	rows, err := s.databaseclient.Pool.Query(ctx, query, chat_id)
+	if err != nil {
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	defer rows.Close()
+
+	var variant models.StoryVariant
+	for rows.Next() {
+		err := rows.Scan(&variant.StoryID, &variant.Data)
+		if err != nil {
+			return nil, fmt.Errorf("server: database error: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server: row iteration error: %w", err)
+	}
+	return &variant, nil
 }
 
 func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, chatID int64) (*models.AllStorySegments, error) {

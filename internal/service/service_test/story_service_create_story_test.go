@@ -43,5 +43,7 @@ func TestCreateStory_Success(t *testing.T) {
 	mockdb.EXPECT().CommitTx(ctx, tx).Return(nil)
 	response, err := serv.CreateStory(ctx, 1, 1)
 	require.Nil(t, err)
-	require.Equal(t, response, text_messages.TextChooseHero(heroes))
+	//! ЗАМЕНИ НА НОВЫЙ ВЫВОД ГЕРОЕВ
+	require.Equal(t, response, text_messages.TextChooseHero(heroes)) //! ЗАМЕНИ НА НОВЫЙ ВЫВОД ГЕРОЕВ
+	//! ЗАМЕНИ НА НОВЫЙ ВЫВОД ГЕРОЕВ
 }

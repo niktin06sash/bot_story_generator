@@ -3,6 +3,7 @@ package ai
 import (
 	"bot_story_generator/internal/models"
 
+	"os"
 	"context"
 	"encoding/json"
 
@@ -46,6 +47,12 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
+	fileData, err := os.ReadFile("promts/main_game_rules.txt")
+	if err != nil {
+		return nil, err
+	}
+	promt := string(fileData)
+
 	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
 		Name:        "fantasy_characters",
 		Description: openai.String("Массив фэнтезийных персонажей"),
@@ -57,7 +64,7 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(ah.conn.promt),
+			openai.UserMessage(promt),
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{

@@ -38,9 +38,9 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*
 			return next(req)
 		}),
 	)
-	fileData, err := os.ReadFile("promts/create_hero.txt")
+	fileData, err := os.ReadFile("promts/main_game_rules.txt")
 	if err != nil {
-		logger.ZapLogger.Error("failed to read promt create_hero.txt", zap.Error(err))
+		logger.ZapLogger.Error("failed to read promt main_game_rules.txt", zap.Error(err))
 		return nil, err
 	}
 	promt := string(fileData)

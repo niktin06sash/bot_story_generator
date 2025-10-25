@@ -55,9 +55,8 @@ type Hero struct {
 	Class      string   `json:"class" jsonschema_description:"Класс или профессия (маг, воин, охотник, некромант и т. д.)" jsonschema:"minLength=1,maxLength=50"`
 	Appearance string   `json:"appearance" jsonschema_description:"Краткое описание внешности (2–3 предложения)" jsonschema:"minLength=20,maxLength=250"`
 	Traits     []string `json:"traits" jsonschema_description:"Основные черты характера (2–3 пункта)" jsonschema:"minItems=2,maxItems=3"`
-	Feature    string   `json:"feature" jsonschema_description:"Ключевая особенность или сила, делающая персонажа уникальным" jsonschema:"minLength=10,maxLength=200"`
-	Biography  string   `json:"biography" jsonschema_description:"Короткий фрагмент биографии (2–5 предложений, атмосферно, без лишней воды)" jsonschema:"minLength=20,maxLength=450"`
-	Tone       string   `json:"tone,omitempty" jsonschema:"enum=epic,enum=dark,enum=neutral,enum=tragic,enum=mysterious" jsonschema_description:"Необязательное поле — тон/стиль описания (можно использовать для фильтрации)"`
+	Feature    string   `json:"feature" jsonschema_description:"Ключевая особенность или сила, делающая персонажа уникальным" jsonschema:"minLength=15,maxLength=250"`
+	Biography  string   `json:"biography" jsonschema_description:"Короткий фрагмент биографии (2–5 предложений, атмосферно, без лишней воды)" jsonschema:"minLength=20,maxLength=500"`
 }
 
 // FantasyCharacters представляет массив персонажей
@@ -79,10 +78,21 @@ type StoryNode struct {
 	Choices   []string `json:"choices" jsonschema_description:"Пять вариантов действия героя, реагирующих на повествование" jsonschema:"minItems=5,maxItems=5"`
 }
 
-// Генерируем JSON схему во время инициализации
-var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
-
 // Story хранит все сегменты истории для текущей игровой сессии
 type AllStorySegments struct {
 	StorySegments []string
+}
+
+// Генерируем JSON схему во время инициализации
+var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
+
+
+// Extension представляет продолжение сюжета
+type Extension struct {
+	Narrative string
+}
+
+// StoryChoise представляет массив историй на выбор
+type StoryChoise struct {
+	Story []Extension
 }

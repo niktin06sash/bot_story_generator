@@ -13,8 +13,8 @@ import (
 )
 
 type StoryService interface {
-	CreateStory(ctx context.Context, chatID, userID int64) (string, error)
-	UserChoice(ctx context.Context, chatID int64, data string) (string, error)
+	CreateStory(ctx context.Context, chatID, userID int64) ([]string, error)
+	UserChoice(ctx context.Context, chatID int64, data string) (string, string, error)
 	CreateUser(ctx context.Context, chatID int64, userID int64) (string, error)
 }
 
@@ -87,12 +87,15 @@ func (r *StoryRouterImpl) routerWorker() {
 				resp, err := r.service.CreateStory(r.ctx, msg.ChatID, msg.UserID)
 				if err != nil {
 					cancel()
-					r.createOutboundMessage(r.ctx, msg.ChatID, resp)
+					r.createOutboundMessage(r.ctx, msg.ChatID, resp[0])
 					r.cleanUserState(msg.ChatID)
 					continue
 				}
 				cancel()
-				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				for i := range(5){
+					r.createOutboundMessage(r.ctx, msg.ChatID, resp[i])
+				}
+				r.createOutboundMessage(r.ctx, msg.ChatID, resp[5], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(msg.ChatID)
 
 			} else if strings.HasPrefix(data, "userChoice_") {
@@ -101,7 +104,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
-				resp, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
+				resp, choise, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
 				if err != nil {
 					cancel()
 					r.createOutboundMessage(r.ctx, msg.ChatID, resp)
@@ -109,6 +112,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				cancel()
+				r.createOutboundMessage(r.ctx, msg.ChatID, choise)
 				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(msg.ChatID)
 

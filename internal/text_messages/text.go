@@ -49,47 +49,6 @@ var TextErrorCreateTask = `
 // надо будет поменять ответ
 var TextErrorUserActiveStory = `Уже есть активная история`
 
-func TextChooseHero(heroes *models.FantasyCharacters) string {
-	resp := "🌟 Выберите своего героя из представленных вариантов:\n"
-	resp += "───────────────────────\n"
-	for idx, hero := range heroes.Characters {
-		resp += fmt.Sprintf("🧙‍♂️ Персонаж #%d\n", idx+1)
-		resp += "───────────────────────\n"
-		if hero.Name != "" {
-			resp += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
-		}
-		if hero.Race != "" {
-			resp += fmt.Sprintf("🧬 Раса: %s\n", hero.Race)
-		}
-		if hero.Class != "" {
-			resp += fmt.Sprintf("⚔️ Класс: %s\n", hero.Class)
-		}
-		if hero.Appearance != "" {
-			resp += fmt.Sprintf("🪞 Внешность: %s\n", hero.Appearance)
-		}
-		if len(hero.Traits) > 0 {
-			resp += "💭 Черты характера: "
-			for i, trait := range hero.Traits {
-				if i > 0 {
-					resp += ", "
-				}
-				resp += trait
-			}
-			resp += "\n"
-		}
-		if hero.Feature != "" {
-			resp += fmt.Sprintf("✨ Особенность: %s\n", hero.Feature)
-		}
-		if hero.Biography != "" {
-			resp += fmt.Sprintf("📜 Биография: %s\n", hero.Biography)
-		}
-		if hero.Tone != "" {
-			resp += fmt.Sprintf("🎭 Тон: %s\n", hero.Tone)
-		}
-		resp += "───────────────────────\n"
-	}
-	return resp
-}
 func TextHelp() string {
 	text := "Вот список команд:\n"
 	for _, command := range TextCommandForHelp {
@@ -113,14 +72,90 @@ var WaitingTextNarrative = `⚔️ Герои собираются с духом
 
 func TextNarrativeWithChoices(narrative string, choices []string) string {
 	resp := ""
+	resp += "━━━━━━━━━━━━━━━━━━━━\n"
 	if narrative != "" {
 		resp += fmt.Sprintf("🧭 Развитие событий:\n%s\n\n", narrative)
 	}
+	resp += "━━━━━━━━━━━━━━━━━━━━\n"
 	if len(choices) > 0 {
 		resp += "⚡ Выбор действий:\n"
 		for i, choice := range choices {
 			resp += fmt.Sprintf("%d️⃣ %s\n", i+1, choice)
 		}
 	}
+	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	return resp
+}
+
+func FormatHeroDescription(h models.Hero) string {
+	var resp string
+	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += "🧝‍♂️Твой герой создан!\n"
+	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+
+	resp += fmt.Sprintf("🪪 Имя: %s\n", h.Name)
+	resp += fmt.Sprintf("🌍 Раса: %s\n", h.Race)
+	resp += fmt.Sprintf("⚔️ Класс: %s\n", h.Class)
+
+	resp += "\n👁️ Внешность:\n"
+	resp += h.Appearance + "\n"
+
+	if len(h.Traits) > 0 {
+		resp += "\n💠 Черты характера:\n"
+		for _, t := range h.Traits {
+			resp += "• " + t + "\n"
+		}
+	}
+
+	resp += "\n✨ Особенность:\n"
+	resp += h.Feature + "\n"
+
+	resp += "\n📜 Биография:\n"
+	resp += h.Biography + "\n"
+
+	resp += "━━━━━━━━━━━━━━━━━━━━"
+
+	return resp
+}
+
+func NewChouseHero(heroes *models.FantasyCharacters) []string {
+	resp := make([]string, 0)
+	// resp := "🌟 Выберите своего героя из представленных вариантов:\n"
+	for idx, hero := range heroes.Characters {
+		str := "───────────────────────\n"
+		str += fmt.Sprintf("🧙‍♂️ Персонаж #%d\n", idx+1)
+		str += "───────────────────────\n"
+		if hero.Name != "" {
+			str += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
+		}
+		if hero.Race != "" {
+			str += fmt.Sprintf("🧬 Раса: %s\n", hero.Race)
+		}
+		if hero.Class != "" {
+			str += fmt.Sprintf("⚔️ Класс: %s\n", hero.Class)
+		}
+		if hero.Appearance != "" {
+			str += fmt.Sprintf("🪞 Внешность: %s\n", hero.Appearance)
+		}
+		if len(hero.Traits) > 0 {
+			str += "💭 Черты характера: "
+			for i, trait := range hero.Traits {
+				if i > 0 {
+					str += ", "
+				}
+				str += trait
+			}
+			str += "\n"
+		}
+		if hero.Feature != "" {
+			str += fmt.Sprintf("✨ Особенность: %s\n", hero.Feature)
+		}
+		if hero.Biography != "" {
+			str += fmt.Sprintf("📜 Биография: %s\n", hero.Biography)
+		}
+		str += "───────────────────────\n"
+		resp = append(resp, str)
+	}
+	resp = append(resp, "🌟 Выберите своего героя из представленных вариантов\n")
 	return resp
 }

@@ -250,30 +250,6 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 	}
 }
 
-// СТАРАЯ ВЕРСИЯ
-func (bot *Bot) waitingMessage(ctx context.Context, sentMsg tgbotapi.Message, chatID int64) {
-	select {
-	case <-ctx.Done():
-		del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
-		_, err := bot.api.Request(del)
-		if err != nil {
-			bot.logger.ZapLogger.Error(
-				"failed to delete loading message",
-				zap.Error(err),
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
-		} else {
-			bot.logger.ZapLogger.Info(
-				"loading message deleted successfully",
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
-		}
-	case <-bot.ctx.Done():
-		return
-	}
-}
 func (bot *Bot) Stop() {
 	bot.cancel()
 	bot.wg.Wait()
