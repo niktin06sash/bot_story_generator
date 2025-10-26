@@ -6,13 +6,12 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, chatId int64, userID int64) IncommingMessage {
-	return IncommingMessage{Data: data, ChatID: chatId, UserID: userID}
+func NewIncommingMessage(data string, userID int64) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID}
 }
 
 type IncommingMessage struct {
 	Data   string
-	ChatID int64
 	UserID int64
 }
 
@@ -85,7 +84,6 @@ type AllStorySegments struct {
 
 // Генерируем JSON схему во время инициализации
 var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
-
 
 // Extension представляет продолжение сюжета
 type Extension struct {

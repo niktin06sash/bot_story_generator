@@ -47,7 +47,10 @@ var TextErrorCreateTask = `
 Попробуй выбрать действие ещё раз чуть позже.`
 
 // надо будет поменять ответ
-var TextErrorUserActiveStory = `Уже есть активная история`
+var TextErrorUserActiveStory = `Уже есть активная история. Сначала завершите текущую!`
+
+// надо будет поменять ответ
+var TextErrorUserDailyLimit = `Превышен лимит дневных ходов. Возвращайтесь завтра!`
 
 func TextHelp() string {
 	text := "Вот список команд:\n"
@@ -119,7 +122,7 @@ func FormatHeroDescription(h models.Hero) string {
 }
 
 func NewChouseHero(heroes *models.FantasyCharacters) []string {
-	resp := make([]string, 0)
+	resp := make([]string, len(heroes.Characters))
 	// resp := "🌟 Выберите своего героя из представленных вариантов:\n"
 	for idx, hero := range heroes.Characters {
 		str := "───────────────────────\n"
@@ -154,8 +157,8 @@ func NewChouseHero(heroes *models.FantasyCharacters) []string {
 			str += fmt.Sprintf("📜 Биография: %s\n", hero.Biography)
 		}
 		str += "───────────────────────\n"
-		resp = append(resp, str)
+		resp[idx] = str
 	}
-	resp = append(resp, "🌟 Выберите своего героя из представленных вариантов\n")
+	resp[len(resp)-1] = "🌟 Выберите своего героя из представленных вариантов\n"
 	return resp
 }

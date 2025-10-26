@@ -13,10 +13,11 @@ import (
 )
 
 type AIConnection struct {
-	client  *openai.Client
-	timeout time.Duration
-	model   string
-	promt   string
+	client                *openai.Client
+	timeout               time.Duration
+	model                 string
+	main_game_rules_promt string
+	create_hero_promt     string
 }
 
 func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*AIConnection, error) {
@@ -43,13 +44,19 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*
 		logger.ZapLogger.Error("failed to read promt main_game_rules.txt", zap.Error(err))
 		return nil, err
 	}
-	promt := string(fileData)
-
+	mgpromt := string(fileData)
+	fileData, err = os.ReadFile("promts/create_hero.txt")
+	if err != nil {
+		logger.ZapLogger.Error("failed to read promt main_game_rules.txt", zap.Error(err))
+		return nil, err
+	}
+	crhero := string(fileData)
 	logger.ZapLogger.Info("AIConnection successfully initialized")
 	return &AIConnection{
-		client:  &client,
-		timeout: cfg.AI.ChatCompletionTimeout,
-		model:   model,
-		promt:   promt,
+		client:                &client,
+		timeout:               cfg.AI.ChatCompletionTimeout,
+		model:                 model,
+		main_game_rules_promt: mgpromt,
+		create_hero_promt:     crhero,
 	}, nil
 }

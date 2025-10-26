@@ -24,7 +24,7 @@ type Bot struct {
 	numworkers  int
 }
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, chatID int64, userID int64)
+	AddComand(ctx context.Context, data string, userID int64)
 	GetOutboundChan() chan models.OutboundMessage
 	CloseCommandChan()
 }
@@ -81,13 +81,12 @@ func (bot *Bot) readIncommingMessage() {
 			}
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
-				chatID := update.CallbackQuery.Message.Chat.ID
 				userID := update.CallbackQuery.From.ID
-				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID), zap.Any("chatID", chatID))
-				bot.router.AddComand(bot.ctx, data, chatID, userID)
+				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID))
+				bot.router.AddComand(bot.ctx, data, userID)
 				//после нажатия на кнопку выбора она исчезает с экрана(надо тестить и проверять как это отображается)
 				edit := tgbotapi.NewEditMessageReplyMarkup(
-					chatID,
+					userID,
 					update.CallbackQuery.Message.MessageID,
 					tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}},
 				)
@@ -95,14 +94,13 @@ func (bot *Bot) readIncommingMessage() {
 				callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 				bot.api.Request(callback)
 			} else if update.Message != nil {
-				chatID := update.Message.Chat.ID
 				text := update.Message.Text
 				msg := update.Message
 				userID := update.Message.From.ID
 				if msg.IsCommand() {
-					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID), zap.Any("chatID", chatID))
+					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
 					command := update.Message.Command()
-					bot.router.AddComand(bot.ctx, command, chatID, userID)
+					bot.router.AddComand(bot.ctx, command, userID)
 				}
 			}
 		}

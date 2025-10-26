@@ -3,7 +3,6 @@ package ai
 import (
 	"bot_story_generator/internal/models"
 
-	"os"
 	"context"
 	"encoding/json"
 
@@ -20,6 +19,8 @@ func NewStoryAI(conn *AIConnection) *StoryAIImpl {
 	}
 }
 
+// Вынеси чтение файлов промтов и логику для них в инициализацию, заебал
+// Проверь те ли файлы используются в промтах
 func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
@@ -28,7 +29,7 @@ func (ah *StoryAIImpl) GetChatCompletion(parctx context.Context) (string, error)
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(ah.conn.promt),
+			openai.UserMessage(ah.conn.main_game_rules_promt),
 		},
 	}
 
@@ -47,12 +48,6 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
-	fileData, err := os.ReadFile("promts/main_game_rules.txt")
-	if err != nil {
-		return nil, err
-	}
-	promt := string(fileData)
-
 	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
 		Name:        "fantasy_characters",
 		Description: openai.String("Массив фэнтезийных персонажей"),
@@ -64,7 +59,7 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(promt),
+			openai.UserMessage(ah.conn.main_game_rules_promt),
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
@@ -104,7 +99,7 @@ func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, currentD
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(""),
-			openai.UserMessage(ah.conn.promt + currentData),
+			openai.UserMessage(ah.conn.main_game_rules_promt + currentData),
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{

@@ -13,9 +13,9 @@ import (
 )
 
 type StoryService interface {
-	CreateStory(ctx context.Context, chatID, userID int64) ([]string, error)
-	UserChoice(ctx context.Context, chatID int64, data string) (string, string, error)
-	CreateUser(ctx context.Context, chatID int64, userID int64) (string, error)
+	CreateStory(ctx context.Context, userID int64) ([]string, error)
+	UserChoice(ctx context.Context, userID int64, data string) ([]string, error)
+	CreateUser(ctx context.Context, userID int64) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -25,7 +25,7 @@ type StoryRouterImpl struct {
 	chan_command  chan models.IncommingMessage
 	chan_outbound chan models.OutboundMessage
 	logger        *logger.Logger
-	userState     map[int64]bool
+	userState     map[int64]struct{}
 	mux           *sync.Mutex
 	wg            *sync.WaitGroup
 	numworkers    int
@@ -39,7 +39,7 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 		service:       service,
 		chan_command:  make(chan models.IncommingMessage, 1000),
 		chan_outbound: make(chan models.OutboundMessage, 1000),
-		userState:     make(map[int64]bool),
+		userState:     make(map[int64]struct{}),
 		mux:           &sync.Mutex{},
 		logger:        logger,
 		wg:            &sync.WaitGroup{},
@@ -67,59 +67,60 @@ func (r *StoryRouterImpl) routerWorker() {
 				return
 			}
 			r.mux.Lock()
-			if r.userState[msg.ChatID] {
+			if _, ok := r.userState[msg.UserID]; ok {
 				r.mux.Unlock()
 				continue
 			}
-			r.userState[msg.ChatID] = true
+			r.userState[msg.UserID] = struct{}{}
 			r.mux.Unlock()
 			data := msg.Data
+			userID := msg.UserID
 			if data == "start" {
-				resp, _ := r.service.CreateUser(r.ctx, msg.ChatID, msg.UserID)
-				r.createOutboundMessage(r.ctx, msg.ChatID, resp)
-				r.cleanUserState(msg.ChatID)
+				resp, _ := r.service.CreateUser(r.ctx, userID)
+				r.createOutboundMessage(r.ctx, userID, resp)
+				r.cleanUserState(userID)
 			} else if data == "newstory" {
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(r.ctx, msg.ChatID, text_messages.TextStartCreateHero)
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextHeroes)
-				resp, err := r.service.CreateStory(r.ctx, msg.ChatID, msg.UserID)
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero)
+				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
+				resp, err := r.service.CreateStory(r.ctx, userID)
 				if err != nil {
 					cancel()
-					r.createOutboundMessage(r.ctx, msg.ChatID, resp[0])
-					r.cleanUserState(msg.ChatID)
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+					r.cleanUserState(userID)
 					continue
 				}
 				cancel()
-				for i := range(5){
-					r.createOutboundMessage(r.ctx, msg.ChatID, resp[i])
+				for i := range len(resp) {
+					r.createOutboundMessage(r.ctx, userID, resp[i])
 				}
-				r.createOutboundMessage(r.ctx, msg.ChatID, resp[5], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
-				r.cleanUserState(msg.ChatID)
+				r.createOutboundMessage(r.ctx, userID, resp[len(resp)-1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				r.cleanUserState(userID)
 
 			} else if strings.HasPrefix(data, "userChoice_") {
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(ctxWithValue, msg.ChatID, text_messages.WaitingTextNarrative)
+				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
-				resp, choise, err := r.service.UserChoice(r.ctx, msg.ChatID, arg)
+				resp, err := r.service.UserChoice(r.ctx, userID, arg)
 				if err != nil {
 					cancel()
-					r.createOutboundMessage(r.ctx, msg.ChatID, resp)
-					r.cleanUserState(msg.ChatID)
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+					r.cleanUserState(userID)
 					continue
 				}
 				cancel()
-				r.createOutboundMessage(r.ctx, msg.ChatID, choise)
-				r.createOutboundMessage(r.ctx, msg.ChatID, resp, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
-				r.cleanUserState(msg.ChatID)
+				r.createOutboundMessage(r.ctx, userID, resp[0])
+				r.createOutboundMessage(r.ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				r.cleanUserState(userID)
 
 			} else if data == "help" {
 				text := text_messages.TextHelp()
-				r.createOutboundMessage(r.ctx, msg.ChatID, text)
-				r.cleanUserState(msg.ChatID)
+				r.createOutboundMessage(r.ctx, userID, text)
+				r.cleanUserState(userID)
 			} else {
 
 			}
@@ -127,25 +128,13 @@ func (r *StoryRouterImpl) routerWorker() {
 	}
 }
 
-func (r *StoryRouterImpl) createOutboundMessage(ctx context.Context, chatID int64, text string, butargs ...models.ButtonArg) {
-	select {
-	case <-r.ctx.Done():
-		return
-	case r.chan_outbound <- models.NewOutboundMessage(ctx, chatID, text, butargs...):
-	}
-}
-func (r *StoryRouterImpl) cleanUserState(chatID int64) {
-	r.mux.Lock()
-	delete(r.userState, chatID)
-	r.mux.Unlock()
-}
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, chatID int64, userID int64) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(data, chatID, userID):
+	case r.chan_command <- models.NewIncommingMessage(data, userID):
 	}
 }
 
