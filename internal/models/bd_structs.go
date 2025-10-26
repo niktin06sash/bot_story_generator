@@ -68,17 +68,17 @@ func NewStoryVariant(storyID int, t string, data []byte) *StoryVariant {
 
 // DailyLimit представляет дневные лимиты пользователя
 type DailyLimit struct {
-	UserID int64     `json:"user_id" db:"user_id"`
-	Date   time.Time `json:"date" db:"date"`
-	Count  int       `json:"msg_count" db:"msg_count"`
-	Limit  int       `json:"daily_limit" db:"daily_limit"`
+	UserID     int64     `json:"user_id" db:"user_id"`
+	Date       time.Time `json:"date" db:"date"`
+	Count      int       `json:"msg_count" db:"msg_count"`
+	LimitCount int       `json:"daily_limit" db:"daily_limit"`
 }
 
 // NewDailyLimit создает новый дневной лимит
 func NewDailyLimit(userID int64, msgCount int, dailyLimit int) *DailyLimit {
 	return &DailyLimit{
-		UserID: userID,
-		Count:  msgCount,
-		Limit:  dailyLimit,
+		UserID:     userID,
+		Count:      msgCount,
+		LimitCount: dailyLimit,
 	}
 }

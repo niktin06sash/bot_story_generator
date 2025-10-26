@@ -125,29 +125,29 @@ func (s *StoryDatabaseImpl) GetVariants(ctx context.Context, userID int64) (*mod
 // LIMITS
 func (s *StoryDatabaseImpl) CheckDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error) {
 	query := `
-		SELECT userID, date, count, limit FROM dailyLimits
+		SELECT userID, date, count, limitCount FROM dailyLimits
 		WHERE userID = $1 and date = CURRENT_DATE
 	`
 	row := s.databaseclient.Pool.QueryRow(ctx, query, userID)
 	limit := &models.DailyLimit{}
-	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.Limit)
+	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.LimitCount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.NewDailyLimit(userID, 1, 5), nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
-	if limit.Limit == limit.Count {
+	if limit.LimitCount == limit.Count {
 		return nil, fmt.Errorf("client: user with user_id=%d has exceeded daily action limit: %w", userID, err)
 	}
 	return limit, nil
 }
 func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
 	query := `
-		INSERT INTO dailyLimits (userID, count, limit)
+		INSERT INTO dailyLimits (userID, count, limitCount)
 		VALUES ($1, $2, $3)
 	`
-	_, err := tx.Exec(ctx, query, dailyLimit.UserID, dailyLimit.Count, dailyLimit.Limit)
+	_, err := tx.Exec(ctx, query, dailyLimit.UserID, dailyLimit.Count, dailyLimit.LimitCount)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}
