@@ -263,7 +263,7 @@ func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]strin
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) > 1 {
-		s.Logger.ZapLogger.Error("GetActiveStories(StopStory)", zap.Error(fmt.Errorf("More one active story found")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveStories(StopStory)", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) == 0 {

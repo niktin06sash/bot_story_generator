@@ -44,10 +44,9 @@ func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) erro
 // STORIES
 func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) ([]*models.Story, error) {
 	query := `
-    	SELECT s.ID, s.userID, s.data, s.createdAt
-    	FROM users u
-    	INNER JOIN stories s ON u.ID = s.userID AND s.isActive = TRUE
-    	WHERE u.ID = $1
+    	SELECT ID, userID, data, createdAt
+    	FROM stories
+    	WHERE userID = $1 and isActive = TRUE
 	`
 	rows, err := s.databaseclient.Pool.Query(ctx, query, userID)
 	if err != nil {
@@ -96,7 +95,7 @@ func (s *StoryDatabaseImpl) StopStory(ctx context.Context, userID int64) error {
 func (s *StoryDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error {
 	query := `
 		INSERT INTO storiesVariants (storyID, data, type)
-    	VALUES ($1, $, $3)
+    	VALUES ($1, $2, $3)
 	`
 	_, err := tx.Exec(ctx, query, variant.StoryID, variant.Data, variant.Type)
 
