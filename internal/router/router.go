@@ -14,8 +14,10 @@ import (
 
 type StoryService interface {
 	CreateStory(ctx context.Context, userID int64) ([]string, error)
-	UserChoice(ctx context.Context, userID int64, data string) ([]string, error)
-	CreateUser(ctx context.Context, userID int64) (string, error)
+	UserChoice(ctx context.Context, userID int64, arg string) ([]string, error)
+	CreateUser(ctx context.Context, userID int64) ([]string, error)
+	StopStory(ctx context.Context, userID int64) ([]string, error)
+	StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error)
 }
 
 type StoryRouterImpl struct {
@@ -24,6 +26,8 @@ type StoryRouterImpl struct {
 	service       StoryService
 	chan_command  chan models.IncommingMessage
 	chan_outbound chan models.OutboundMessage
+	chan_edit     chan models.EditMessage
+	chan_delete   chan models.DeleteMessage
 	logger        *logger.Logger
 	userState     map[int64]struct{}
 	mux           *sync.Mutex
@@ -39,6 +43,8 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 		service:       service,
 		chan_command:  make(chan models.IncommingMessage, 1000),
 		chan_outbound: make(chan models.OutboundMessage, 1000),
+		chan_edit:     make(chan models.EditMessage, 1000),
+		chan_delete:   make(chan models.DeleteMessage, 1000),
 		userState:     make(map[int64]struct{}),
 		mux:           &sync.Mutex{},
 		logger:        logger,
@@ -75,9 +81,14 @@ func (r *StoryRouterImpl) routerWorker() {
 			r.mux.Unlock()
 			data := msg.Data
 			userID := msg.UserID
+			msgID := msg.MsgID
 			if data == "start" {
-				resp, _ := r.service.CreateUser(r.ctx, userID)
-				r.createOutboundMessage(r.ctx, userID, resp)
+				resp, err := r.service.CreateUser(r.ctx, userID)
+				if err != nil {
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+				} else {
+					r.createOutboundMessage(r.ctx, userID, resp[0])
+				}
 				r.cleanUserState(userID)
 			} else if data == "newstory" {
 				localctx, cancel := context.WithCancel(r.ctx)
@@ -113,6 +124,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				cancel()
+				r.createEditMessage(userID, msgID, "")
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.createOutboundMessage(r.ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
@@ -121,27 +133,50 @@ func (r *StoryRouterImpl) routerWorker() {
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(r.ctx, userID, text)
 				r.cleanUserState(userID)
-			} else {
-
+			} else if data == "stopstory" {
+				resp, err := r.service.StopStory(r.ctx, userID)
+				if err != nil {
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+				} else {
+					r.createOutboundMessage(r.ctx, userID, resp[0], models.NewButtonArg("stopStoryChoice_", []string{"✅", "❌"}))
+				}
+				r.cleanUserState(userID)
+			} else if strings.HasPrefix(data, "stopStoryChoice_") {
+				arg := strings.TrimPrefix(data, "stopStoryChoice_")
+				resp, err := r.service.StopStoryChoice(r.ctx, userID, arg)
+				r.createDeleteMessage(userID, msgID)
+				if resp == nil && err == nil {
+					r.cleanUserState(userID)
+					continue
+				}
+				if err != nil {
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+					r.cleanUserState(userID)
+					continue
+				}
+				r.createOutboundMessage(r.ctx, userID, resp[0])
+				r.cleanUserState(userID)
 			}
 		}
 	}
 }
 
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(data, userID):
+	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID):
 	}
 }
 
-func (r *StoryRouterImpl) GetOutboundChan() chan models.OutboundMessage {
-	return r.chan_outbound
+func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage) {
+	return r.chan_outbound, r.chan_edit, r.chan_delete
 }
-
+func (r *StoryRouterImpl) GetEditChan() chan models.EditMessage {
+	return r.chan_edit
+}
 func (r *StoryRouterImpl) CloseCommandChan() {
 	close(r.chan_command)
 }
@@ -150,5 +185,7 @@ func (r *StoryRouterImpl) Stop() {
 	r.cancel()
 	r.wg.Wait()
 	close(r.chan_outbound)
+	close(r.chan_edit)
+	close(r.chan_delete)
 	r.logger.ZapLogger.Info("Router stopped")
 }

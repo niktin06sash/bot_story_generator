@@ -6,25 +6,27 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, userID int64) IncommingMessage {
-	return IncommingMessage{Data: data, UserID: userID}
+func NewIncommingMessage(data string, userID int64, msgID int) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID}
 }
 
 type IncommingMessage struct {
 	Data   string
 	UserID int64
+	MsgID  int
 }
 
-func NewOutboundMessage(ctx context.Context, chatId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
-	return OutboundMessage{Ctx: ctx, ChatID: chatId, Text: text, ButtonArgs: buttonArgs}
+func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
+	return OutboundMessage{Ctx: ctx, UserID: userId, Text: text, ButtonArgs: buttonArgs}
 }
 
 type OutboundMessage struct {
 	Ctx        context.Context
-	ChatID     int64
+	UserID     int64
 	Text       string
 	ButtonArgs []ButtonArg
 }
+
 type ButtonArg struct {
 	ButtonName string
 	Args       []string
@@ -32,6 +34,26 @@ type ButtonArg struct {
 
 func NewButtonArg(btn string, args []string) ButtonArg {
 	return ButtonArg{ButtonName: btn, Args: args}
+}
+
+func NewEditMessage(userID int64, msgID int, text string, buttonArgs ...ButtonArg) EditMessage {
+	return EditMessage{UserID: userID, MsgID: msgID, ButtonArgs: buttonArgs, Text: text}
+}
+
+type EditMessage struct {
+	UserID     int64
+	MsgID      int
+	Text       string
+	ButtonArgs []ButtonArg
+}
+
+type DeleteMessage struct {
+	UserID int64
+	MsgID  int
+}
+
+func NewDeleteMessage(userID int64, msgID int) EditMessage {
+	return EditMessage{UserID: userID, MsgID: msgID}
 }
 
 // GenerateSchema генерирует JSON схему для типа T

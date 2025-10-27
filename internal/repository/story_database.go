@@ -42,39 +42,54 @@ func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) erro
 }
 
 // STORIES
-func (s *StoryDatabaseImpl) CheckActiveStories(ctx context.Context, userID int64) error {
+func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) ([]*models.Story, error) {
 	query := `
-    	SELECT u.ID, COUNT(s.ID) AS count_active_story
+    	SELECT s.ID, s.userID, s.data, s.createdAt
     	FROM users u
-    	LEFT JOIN stories s ON u.ID = s.userID AND s.isActive = TRUE
+    	INNER JOIN stories s ON u.ID = s.userID AND s.isActive = TRUE
     	WHERE u.ID = $1
-    	GROUP BY u.ID
 	`
-	row := s.databaseclient.Pool.QueryRow(ctx, query, userID)
-	var scanuserID int64
-	var countActive int64
-	err := row.Scan(&scanuserID, &countActive)
+	rows, err := s.databaseclient.Pool.Query(ctx, query, userID)
 	if err != nil {
-		return fmt.Errorf("server: database error: %w", err)
+		return nil, fmt.Errorf("server: database error: %w", err)
 	}
-	if countActive > 0 {
-		return fmt.Errorf("client: user with user_id=%d already has an active history", scanuserID)
+	defer rows.Close()
+	var stories []*models.Story
+	for rows.Next() {
+		story := &models.Story{}
+		err := rows.Scan(&story.ID, &story.UserID, &story.Data, &story.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("server: database error: %w", err)
+		}
+		stories = append(stories, story)
 	}
-	return nil
+	return stories, nil
 }
 func (s *StoryDatabaseImpl) AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error) {
 	query := `
-		INSERT INTO stories (userID)
-    	VALUES ($1)
+		INSERT INTO stories (userID, data)
+    	VALUES ($1, $2)
 		RETURNING ID
 	`
-	row := tx.QueryRow(ctx, query, story.UserID)
+	row := tx.QueryRow(ctx, query, story.UserID, story.Data)
 	var storyID int
 	err := row.Scan(&storyID)
 	if err != nil {
 		return 0, fmt.Errorf("server: database error: %w", err)
 	}
 	return storyID, nil
+}
+func (s *StoryDatabaseImpl) StopStory(ctx context.Context, userID int64) error {
+	query := `
+		UPDATE stories 
+		SET isActive = FALSE 
+		WHERE userID = $1 AND isActive = TRUE
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query, userID)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
 }
 
 // VARIANTS
@@ -90,7 +105,7 @@ func (s *StoryDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant *
 	}
 	return nil
 }
-func (s *StoryDatabaseImpl) GetVariants(ctx context.Context, userID int64) (*models.StoryVariant, error) {
+func (s *StoryDatabaseImpl) GetActiveVariants(ctx context.Context, userID int64) ([]*models.StoryVariant, error) {
 	query := `
 		SELECT sv.storyid, sv.data, sv.type
 		FROM storiesVariants sv
@@ -112,18 +127,11 @@ func (s *StoryDatabaseImpl) GetVariants(ctx context.Context, userID int64) (*mod
 		}
 		variants = append(variants, variant)
 	}
-
-	if len(variants) > 1 {
-		return nil, fmt.Errorf("server: database error: more one active story found for user_id=%d", userID)
-	}
-	if len(variants) == 0 {
-		return nil, fmt.Errorf("server: database error: no active story found for user_id=%d", userID)
-	}
-	return variants[0], nil
+	return variants, nil
 }
 
 // LIMITS
-func (s *StoryDatabaseImpl) CheckDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error) {
+func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error) {
 	query := `
 		SELECT userID, date, count, limitCount FROM dailyLimits
 		WHERE userID = $1 and date = CURRENT_DATE
@@ -136,9 +144,6 @@ func (s *StoryDatabaseImpl) CheckDailyLimit(ctx context.Context, userID int64) (
 			return models.NewDailyLimit(userID, 1, 5), nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
-	}
-	if limit.LimitCount == limit.Count {
-		return nil, fmt.Errorf("client: user with user_id=%d has exceeded daily action limit: %w", userID, err)
 	}
 	return limit, nil
 }

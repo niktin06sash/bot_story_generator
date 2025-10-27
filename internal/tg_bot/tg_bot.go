@@ -24,8 +24,8 @@ type Bot struct {
 	numworkers  int
 }
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64)
-	GetOutboundChan() chan models.OutboundMessage
+	AddComand(ctx context.Context, data string, userID int64, msgID int)
+	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage)
 	CloseCommandChan()
 }
 
@@ -59,15 +59,24 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 	}, nil
 }
 func (bot *Bot) StartBot() {
+	outbound, edit, delete := bot.router.GetRouterChans()
 	//maybe increase the number of worker-bots(field = numworkers)
-	bot.wg.Add(2)
+	bot.wg.Add(4)
 	go func() {
 		defer bot.wg.Done()
 		bot.readIncommingMessage()
 	}()
 	go func() {
 		defer bot.wg.Done()
-		bot.sendOutboundMessage()
+		bot.sendOutboundMessage(outbound)
+	}()
+	go func() {
+		defer bot.wg.Done()
+		bot.sendEditMessage(edit)
+	}()
+	go func() {
+		defer bot.wg.Done()
+		bot.sendDeleteMessage(delete)
 	}()
 }
 func (bot *Bot) readIncommingMessage() {
@@ -82,38 +91,116 @@ func (bot *Bot) readIncommingMessage() {
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
 				userID := update.CallbackQuery.From.ID
+				msgID := update.CallbackQuery.Message.MessageID
 				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID))
-				bot.router.AddComand(bot.ctx, data, userID)
-				//после нажатия на кнопку выбора она исчезает с экрана(надо тестить и проверять как это отображается)
-				edit := tgbotapi.NewEditMessageReplyMarkup(
-					userID,
-					update.CallbackQuery.Message.MessageID,
-					tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}},
-				)
-				bot.api.Request(edit)
-				callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
-				bot.api.Request(callback)
+				bot.router.AddComand(bot.ctx, data, userID, msgID)
+				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 			} else if update.Message != nil {
 				text := update.Message.Text
 				msg := update.Message
 				userID := update.Message.From.ID
+				msgID := msg.MessageID
 				if msg.IsCommand() {
 					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
 					command := update.Message.Command()
-					bot.router.AddComand(bot.ctx, command, userID)
+					bot.router.AddComand(bot.ctx, command, userID, msgID)
 				}
 			}
 		}
 	}
 }
-
-func (bot *Bot) sendOutboundMessage() {
-	outch := bot.router.GetOutboundChan()
+func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 	for {
 		select {
 		case <-bot.ctx.Done():
 			return
-		case outMsg, ok := <-outch:
+		case editMsg, ok := <-ch:
+			if !ok {
+				return
+			}
+
+			var keyboard tgbotapi.InlineKeyboardMarkup
+			if len(editMsg.ButtonArgs) > 0 {
+				var rows [][]tgbotapi.InlineKeyboardButton
+				for _, btn := range editMsg.ButtonArgs {
+					for _, arg := range btn.Args {
+						button := tgbotapi.NewInlineKeyboardButtonData(arg, btn.ButtonName+arg)
+						row := tgbotapi.NewInlineKeyboardRow(button)
+						rows = append(rows, row)
+					}
+				}
+				keyboard = tgbotapi.NewInlineKeyboardMarkup(rows...)
+			} else {
+				keyboard = tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}}
+			}
+			var edit tgbotapi.Chattable
+			if editMsg.Text == "" {
+				edit = tgbotapi.NewEditMessageReplyMarkup(
+					editMsg.UserID,
+					editMsg.MsgID,
+					keyboard,
+				)
+
+			} else {
+				edit = tgbotapi.NewEditMessageTextAndMarkup(
+					editMsg.UserID,
+					editMsg.MsgID,
+					editMsg.Text,
+					keyboard,
+				)
+			}
+			_, err := bot.api.Request(edit)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to edit message",
+					zap.Error(err),
+					zap.Int64("user_id", editMsg.UserID),
+					zap.Int("msg_id", editMsg.MsgID),
+				)
+				continue
+			}
+			bot.logger.ZapLogger.Info(
+				"message edited successfully",
+				zap.Int64("user_id", editMsg.UserID),
+				zap.Int("msg_id", editMsg.MsgID),
+			)
+		}
+	}
+}
+func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
+	for {
+		select {
+		case <-bot.ctx.Done():
+			return
+		case deleteMsg, ok := <-ch:
+			if !ok {
+				return
+			}
+			del := tgbotapi.NewDeleteMessage(deleteMsg.UserID, deleteMsg.MsgID)
+			_, err := bot.api.Request(del)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to delete message",
+					zap.Error(err),
+					zap.Int64("user_id", deleteMsg.UserID),
+					zap.Int("message_id", deleteMsg.MsgID),
+				)
+			} else {
+				bot.logger.ZapLogger.Info(
+					"message deleted successfully",
+					zap.Int64("user_id", deleteMsg.UserID),
+					zap.Int("message_id", deleteMsg.MsgID),
+				)
+			}
+		}
+	}
+}
+func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
+	for {
+		select {
+		case <-bot.ctx.Done():
+			return
+		case outMsg, ok := <-ch:
 			if !ok {
 				return
 			}
@@ -127,14 +214,8 @@ func (bot *Bot) sendOutboundMessage() {
 			} else {
 				text = []string{strings.TrimSpace(outMsg.Text)}
 			}
-			msg, err := bot.sendMessage(outMsg.ChatID, text[0], outMsg.ButtonArgs)
+			msg, err := bot.sendMessage(outMsg.UserID, text[0], outMsg.ButtonArgs)
 			if err != nil {
-				bot.logger.ZapLogger.Error(
-					"failed to send outbound message",
-					zap.Error(err),
-					zap.Int64("chat_id", outMsg.ChatID),
-					zap.String("text", outMsg.Text),
-				)
 				continue
 			}
 			//*опционально в будущем придумать логику для выбора разных значений контекста
@@ -152,15 +233,15 @@ func (bot *Bot) sendOutboundMessage() {
 				bot.wg.Add(1)
 				go func() {
 					defer bot.wg.Done()
-					bot.waitingMessageWithAnimation(localctx, msg, outMsg.ChatID, text)
+					bot.waitingMessageWithAnimation(localctx, msg, outMsg.UserID, text)
 				}()
 			}
 		}
 	}
 }
 
-func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg) (tgbotapi.Message, error) {
-	msg := tgbotapi.NewMessage(chatID, text)
+func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg) (tgbotapi.Message, error) {
+	msg := tgbotapi.NewMessage(userID, text)
 	if len(butarg) > 0 {
 		var rows [][]tgbotapi.InlineKeyboardButton
 		for _, btn := range butarg {
@@ -178,14 +259,14 @@ func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg
 		bot.logger.ZapLogger.Error(
 			"failed to send message",
 			zap.Error(err),
-			zap.Int64("chat_id", chatID),
+			zap.Int64("user_id", userID),
 			zap.String("message", msg.Text),
 		)
 		return sentmsg, err
 	}
 	bot.logger.ZapLogger.Info(
 		"message sent successfully",
-		zap.Int64("chat_id", chatID),
+		zap.Int64("user_id", userID),
 		zap.String("message", msg.Text),
 	)
 
@@ -193,14 +274,14 @@ func (bot *Bot) sendMessage(chatID int64, text string, butarg []models.ButtonArg
 }
 
 // НОВАЯ ВЕРСИЯ
-func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, chatID int64, inputText []string) {
+func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string) {
 	currentIdx := 1
 	if len(inputText) == 1 {
 		currentIdx = 0
 	}
 	bot.logger.ZapLogger.Info(
 		"Starting waitingMessageWithAnimation",
-		zap.Int64("chat_id", chatID),
+		zap.Int64("user_id", userID),
 		zap.Int("message_id", sentMsg.MessageID),
 	)
 	ticker := time.NewTicker(5 * time.Second)
@@ -210,22 +291,22 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 		case <-ctx.Done():
 			bot.logger.ZapLogger.Info(
 				"context cancelled, deleting loading message",
-				zap.Int64("chat_id", chatID),
+				zap.Int64("user_id", userID),
 				zap.Int("message_id", sentMsg.MessageID),
 			)
-			del := tgbotapi.NewDeleteMessage(chatID, sentMsg.MessageID)
+			del := tgbotapi.NewDeleteMessage(userID, sentMsg.MessageID)
 			_, err := bot.api.Request(del)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
 					"failed to delete loading message",
 					zap.Error(err),
-					zap.Int64("chat_id", chatID),
+					zap.Int64("user_id", userID),
 					zap.Int("message_id", sentMsg.MessageID),
 				)
 			} else {
 				bot.logger.ZapLogger.Info(
 					"loading message deleted successfully",
-					zap.Int64("chat_id", chatID),
+					zap.Int64("user_id", userID),
 					zap.Int("message_id", sentMsg.MessageID),
 				)
 			}
@@ -233,13 +314,13 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 		case <-bot.ctx.Done():
 			return
 		case <-ticker.C:
-			editMsg := tgbotapi.NewEditMessageText(chatID, sentMsg.MessageID, inputText[currentIdx])
+			editMsg := tgbotapi.NewEditMessageText(userID, sentMsg.MessageID, inputText[currentIdx])
 			_, err := bot.api.Send(editMsg)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
 					"failed to update waiting message",
 					zap.Error(err),
-					zap.Int64("chat_id", chatID),
+					zap.Int64("user_id", userID),
 					zap.Int("message_id", sentMsg.MessageID),
 				)
 			}

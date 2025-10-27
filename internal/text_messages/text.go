@@ -50,6 +50,15 @@ var TextErrorCreateTask = `
 var TextErrorUserActiveStory = `Уже есть активная история. Сначала завершите текущую!`
 
 // надо будет поменять ответ
+var TextStopActiveStory = `Вы действительно хотите завершить текущую историю?`
+
+// надо будет поменять ответ
+var TextNoActiveStory = `У вас нет активной истории. Воспользуйтесь командой /newstory`
+
+// надо будет поменять ответ
+var TextSuccessStopStory = `Вы успешно завершили историю. Для создания новой воспользуйтесь кнопкой /newstory`
+
+// надо будет поменять ответ
 var TextErrorUserDailyLimit = `Превышен лимит дневных ходов. Возвращайтесь завтра!`
 
 func TextHelp() string {
