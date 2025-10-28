@@ -251,7 +251,7 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "client: ") {
 			s.Logger.ZapLogger.Warn("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
-			return nil, errors.New(text_messages.TextHelp())
+			return nil, errors.New(text_messages.TextGreeting)
 		}
 		s.Logger.ZapLogger.Error("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)

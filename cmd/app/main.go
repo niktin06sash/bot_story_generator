@@ -43,7 +43,7 @@ func main() {
 	}
 	defer pgx.Close()
 
-	storyDatabase := repository.NewStoryDatabase(pgx)
+	storyDatabase := repository.NewStoryDatabase(cfg, pgx)
 
 	//ии(подключение + методы ии)
 	aiConn, err := ai.NewAIConnection(cfg, logger, cfg.AI.Model)

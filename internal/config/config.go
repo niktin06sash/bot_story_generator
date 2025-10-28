@@ -14,22 +14,30 @@ type Config struct {
 	AI         AIConfig
 	Database   DatabaseConfig
 	NumWorkers int
+	Setting    BotSetting
 }
+
 type TelegramConfig struct {
 	BotToken string
 	BotDebug bool
 	Offset   int
 	Timeout  int
 }
+
 type AIConfig struct {
-	ConnectTimeout        time.Duration //"30s"
+	ConnectTimeout        time.Duration
 	ChatCompletionTimeout time.Duration
 	ApiKey                string
 	Model                 string
 }
+
 type DatabaseConfig struct {
 	ConnectTimeout time.Duration
 	URL            string
+}
+
+type BotSetting struct {
+	TokenDayLimit int
 }
 
 func NewConfig() (*Config, error) {
@@ -81,21 +89,33 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	tokenLimit := os.Getenv("TOKEN_DAY_LIMIT")
+	numTokenLimit, err := strconv.Atoi(tokenLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Telegram: TelegramConfig{
 			BotToken: botToken,
 			BotDebug: telegramBotDebug,
 			Offset:   bo,
 			Timeout:  to,
-		}, AI: AIConfig{
+		},
+		AI: AIConfig{
 			ApiKey:                aIApiKey,
 			Model:                 aIModel,
 			ConnectTimeout:        aicondur,
 			ChatCompletionTimeout: aicomdur,
-		}, Database: DatabaseConfig{
+		},
+		Database: DatabaseConfig{
 			ConnectTimeout: databasecondur,
 			URL:            databaseConnectUrl,
-		}, NumWorkers: num,
+		},
+		NumWorkers: num,
+		Setting: BotSetting{
+			TokenDayLimit: numTokenLimit,
+		},
 	}
 
 	return cfg, nil

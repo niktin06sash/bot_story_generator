@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/database"
 	"bot_story_generator/internal/models"
 	"errors"
@@ -13,10 +14,14 @@ import (
 
 type StoryDatabaseImpl struct {
 	databaseclient *database.DBObject
+	TokenDayLimit int
 }
 
-func NewStoryDatabase(db *database.DBObject) *StoryDatabaseImpl {
-	return &StoryDatabaseImpl{databaseclient: db}
+func NewStoryDatabase(cfg *config.Config, db *database.DBObject) *StoryDatabaseImpl {
+	return &StoryDatabaseImpl{
+		databaseclient: db,
+		TokenDayLimit:  cfg.Setting.TokenDayLimit,
+	}
 }
 
 // USERS
@@ -139,7 +144,7 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.LimitCount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.NewDailyLimit(userID, 0, 5), nil
+			return models.NewDailyLimit(userID, 0, s.TokenDayLimit), nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
