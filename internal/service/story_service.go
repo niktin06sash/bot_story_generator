@@ -56,16 +56,18 @@ func NewStoryService(db StoryDatabase, ai StoryAI, logger *logger.Logger) *Story
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	s.Logger.ZapLogger.Info("Creating new story", zap.Any("userID", userID))
+
 	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
 	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetDailyLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	if limit.LimitCount == limit.Count {
+	if limit.LimitCount <= limit.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit(CreateStory)", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
 	}
+
 	// Проверяем, нет ли активных историй у пользователя в данный момент
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
@@ -76,6 +78,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Warn("GetActiveStories(CreateStory)", zap.Error(errors.New("client: user already has an active history")), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorUserActiveStory)
 	}
+
 	// Запрос в ИИ
 	fantasyCharacters, err := s.AIStory.GetStructuredHeroes(ctx)
 	if err != nil {
@@ -87,12 +90,14 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("Marshal(CreateStory)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx(CreateStory)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
 	story := models.NewStory(userID, nil)
 	storyId, err := s.DBStory.AddStory(ctx, tx, story)
@@ -104,6 +109,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Создаем начальный вариант с данными из ИИ
 	variant := models.NewStoryVariant(storyId, "characters", data)
 	err = s.DBStory.AddVariant(ctx, tx, variant)
@@ -115,11 +121,13 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
 	err = s.incrementOrAddDailyLimit(ctx, tx, limit, "CreateStory")
 	if err != nil {
 		return nil, err
 	}
+
 	// Делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты, лимиты)
 	err = s.DBStory.CommitTx(ctx, tx)
 	if err != nil {
@@ -131,27 +139,25 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 }
 
 func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
-	//TODO добавить проверку на токены и сделать что то с тем,
-	//TODO что если токенов нет будет, но юзер сделает выбор, то кнопки пропадут
-	//TODO можно убирать кнопки только после успешного исполнения задачи
-	//TODO если даже на кнопку нажали повторно, то мьютекс заблочит задачу из первого нажатия и будет скипать последующие
-	//TODO будто бы контекстом с ключом так же сообщить боту, но все упирается в айди сообщения телеграм
 	s.Logger.ZapLogger.Info("User making a choice", zap.Any("userID", userID), zap.String("choice", num))
 	number_choise, err := strconv.Atoi(num)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Invalid user choice(UserChoice)", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
+	// Проверяем лимиты
 	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetDailyLimit(UserChoice)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	if limit.LimitCount == limit.Count {
+	if limit.LimitCount <= limit.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit(UserChoice)", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
 	}
-	//* Получаем варианты выбора пользователя
+
+	// Получаем варианты выбора пользователя
 	variants, dbErr := s.DBStory.GetActiveVariants(ctx, userID)
 	if dbErr != nil {
 		s.Logger.ZapLogger.Error("GetActiveVariants(UserChoice)", zap.Error(dbErr), zap.Any("userID", userID))
@@ -166,8 +172,8 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	variant := variants[0]
-	//TODO определить, что получаем - fantasyCharactres или storyVariants
 
+	// Определяем текст выбора пользователя
 	var msg string
 	switch variant.Type {
 	case "characters":
@@ -191,6 +197,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		msg = text_messages.CreateExtensionMessage(&userVariant)
 		s.Logger.ZapLogger.Info("Fetched action variant(UserChoice)", zap.Any("variant", userVariant), zap.Any("userID", userID))
 	}
+
 	//для начала сделай всю работу с ии и только потом пиши в базу данных, чтобы транзакция не висела и не ждала когда ии нагенерит
 
 	//TODO генерим ответ ии - вынести в другую функцию потом
@@ -199,7 +206,6 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	allStory, dbErr := s.DBStory.GetAllStorySegments(ctx, userID)
 	if dbErr != nil {
 		s.Logger.ZapLogger.Error("GetAllStorySegments(UserChoice)", zap.Error(dbErr), zap.Any("userID", userID))
-		// You may want to return here or handle the error appropriately
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	fullStory := ""
@@ -209,38 +215,43 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	segment, aiErr := s.AIStory.GenerateNextStorySegment(ctx, fullStory)
 	if aiErr != nil {
 		s.Logger.ZapLogger.Error("GenerateNextStorySegment(UserChoice)", zap.Error(aiErr), zap.Any("userID", userID))
-		// You may want to return here or handle the error appropriately
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	narrative := segment.Narrative
 	choise := segment.Choices
 
 	s.Logger.ZapLogger.Info("Generated next segment(UserChoice)", zap.Any("userID", userID), zap.String("narrative", narrative), zap.Any("choices", choise))
+	
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx(UserChoice)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	//TODO записывем выбор в бд
+
 	//TODO записываем в бд повестование
 
 	//TODO записываем в бд варианты выборов
 
 	//TODO отправляем сообщение юзеру с вариантами ответа
 
-	resp := text_messages.TextNarrativeWithChoices(narrative, choise)
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
 	err = s.incrementOrAddDailyLimit(ctx, tx, limit, "UserChoice")
 	if err != nil {
 		return nil, err
 	}
+
 	// Делаем подтверждение транзакции после изменения таблиц
 	err = s.DBStory.CommitTx(ctx, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx(UserChoice)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
+	// Возвращаем ответ
+	resp := text_messages.TextNarrativeWithChoices(narrative, choise)
 	return []string{msg, resp}, nil
 }
 

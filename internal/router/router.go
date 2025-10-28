@@ -82,6 +82,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			data := msg.Data
 			userID := msg.UserID
 			msgID := msg.MsgID
+
 			if data == "start" {
 				resp, err := r.service.CreateUser(r.ctx, userID)
 				if err != nil {
@@ -90,6 +91,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					r.createOutboundMessage(r.ctx, userID, resp[0])
 				}
 				r.cleanUserState(userID)
+
 			} else if data == "newstory" {
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
@@ -133,6 +135,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(r.ctx, userID, text)
 				r.cleanUserState(userID)
+
 			} else if data == "stopstory" {
 				resp, err := r.service.StopStory(r.ctx, userID)
 				if err != nil {
@@ -141,6 +144,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					r.createOutboundMessage(r.ctx, userID, resp[0], models.NewButtonArg("stopStoryChoice_", []string{"✅", "❌"}))
 				}
 				r.cleanUserState(userID)
+				
 			} else if strings.HasPrefix(data, "stopStoryChoice_") {
 				arg := strings.TrimPrefix(data, "stopStoryChoice_")
 				resp, err := r.service.StopStoryChoice(r.ctx, userID, arg)

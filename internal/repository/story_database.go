@@ -150,6 +150,7 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 	}
 	return limit, nil
 }
+
 func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
 	query := `
         INSERT INTO dailyLimits (userID, count, limitCount)
@@ -161,6 +162,8 @@ func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyL
 	}
 	return nil
 }
+
+//TODO Добавить возможность выбирать на сколько увеличить лимит
 func (s *StoryDatabaseImpl) IncrementDailyLimit(ctx context.Context, tx pgx.Tx, userID int64) error {
 	query := `
         UPDATE dailyLimits 
