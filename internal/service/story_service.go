@@ -53,6 +53,7 @@ type StoryServiceImpl struct {
 func NewStoryService(db StoryDatabase, ai StoryAI, logger *logger.Logger) *StoryServiceImpl {
 	return &StoryServiceImpl{DBStory: db, AIStory: ai, Logger: logger}
 }
+
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	s.Logger.ZapLogger.Info("Creating new story", zap.Any("userID", userID))
 	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
@@ -166,6 +167,8 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	variant := variants[0]
 	//TODO определить, что получаем - fantasyCharactres или storyVariants
+
+	var msg string
 	switch variant.Type {
 	case "characters":
 		var fantasyCharacters models.FantasyCharacters
@@ -175,15 +178,18 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
 		userVariant := fantasyCharacters.Characters[number_choise]
+		msg = text_messages.CreateHeroMessage(&userVariant)
 		s.Logger.ZapLogger.Info("Fetched story variant(UserChoice)", zap.Any("variants", userVariant), zap.Any("userID", userID))
 	case "actions":
-		//че тут к чему в итоге приводить - нет такого типа storyVariants в models
-		var fantasyActions models.StoryNode
-		err = json.Unmarshal(variant.Data, &fantasyActions)
+		var storyActions models.StoryChoise
+		err = json.Unmarshal(variant.Data, &storyActions)
 		if err != nil {
 			s.Logger.ZapLogger.Error("Unmarshal(UserChoice)", zap.Error(err), zap.Any("userID", userID))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
+		userVariant := storyActions.Story[number_choise]
+		msg = text_messages.CreateExtensionMessage(&userVariant)
+		s.Logger.ZapLogger.Info("Fetched action variant(UserChoice)", zap.Any("variant", userVariant), zap.Any("userID", userID))
 	}
 	//для начала сделай всю работу с ии и только потом пиши в базу данных, чтобы транзакция не висела и не ждала когда ии нагенерит
 
@@ -198,7 +204,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	fullStory := ""
 	for _, segment := range allStory.StorySegments {
-		fullStory = "\n" + segment
+		fullStory += "\n" + segment
 	}
 	segment, aiErr := s.AIStory.GenerateNextStorySegment(ctx, fullStory)
 	if aiErr != nil {
@@ -224,8 +230,6 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	//TODO отправляем сообщение юзеру с вариантами ответа
 
 	resp := text_messages.TextNarrativeWithChoices(narrative, choise)
-	//TODO сделать выбор вывода героя или истории
-	user_variant := text_messages.FormatHeroDescription(userVariant)
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
 	err = s.incrementOrAddDailyLimit(ctx, tx, limit, "UserChoice")
 	if err != nil {
@@ -237,7 +241,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("CommitTx(UserChoice)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	return []string{user_variant, resp}, nil
+	return []string{msg, resp}, nil
 }
 
 func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]string, error) {
@@ -255,6 +259,7 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID))
 	return []string{text_messages.TextGreeting}, nil
 }
+
 func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]string, error) {
 	s.Logger.ZapLogger.Info("Checking active story", zap.Any("userID", userID))
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
@@ -273,6 +278,7 @@ func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]strin
 	s.Logger.ZapLogger.Info("Check active story successfully", zap.Any("userID", userID))
 	return []string{text_messages.TextStopActiveStory}, nil
 }
+
 func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error) {
 	if arg == "❌" {
 		return nil, nil

@@ -104,7 +104,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				cancel()
-				for i := range len(resp) {
+				for i := 0; i < len(resp)-1; i++ {
 					r.createOutboundMessage(r.ctx, userID, resp[i])
 				}
 				r.createOutboundMessage(r.ctx, userID, resp[len(resp)-1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))

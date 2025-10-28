@@ -3,7 +3,10 @@ package text_messages
 import (
 	"bot_story_generator/internal/models"
 	"fmt"
+	"strings"
 )
+
+const Divider = "━━━━━━━━━━━━━━━━━━━━\n"
 
 var TextGreeting = `Привет! 👋
 Я — твой проводник в мире интерактивных историй.
@@ -28,6 +31,10 @@ var TextCommandForHelp = []textCommandForHelp{
 	{
 		Command: "/newstory",
 		Text:    "Начать новое приключение",
+	},
+	{
+		Command: "/stopstory",
+		Text:    "Завершить текущую историю",
 	},
 	{
 		Command: "/help",
@@ -84,26 +91,26 @@ var WaitingTextNarrative = `⚔️ Герои собираются с духом
 
 func TextNarrativeWithChoices(narrative string, choices []string) string {
 	resp := ""
-	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += Divider
 	if narrative != "" {
 		resp += fmt.Sprintf("🧭 Развитие событий:\n%s\n\n", narrative)
 	}
-	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += Divider
 	if len(choices) > 0 {
 		resp += "⚡ Выбор действий:\n"
 		for i, choice := range choices {
 			resp += fmt.Sprintf("%d️⃣ %s\n", i+1, choice)
 		}
 	}
-	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += Divider
 	return resp
 }
 
 func FormatHeroDescription(h models.Hero) string {
 	var resp string
-	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += Divider
 	resp += "🧝‍♂️Твой герой создан!\n"
-	resp += "━━━━━━━━━━━━━━━━━━━━\n"
+	resp += Divider
 
 	resp += fmt.Sprintf("🪪 Имя: %s\n", h.Name)
 	resp += fmt.Sprintf("🌍 Раса: %s\n", h.Race)
@@ -125,18 +132,17 @@ func FormatHeroDescription(h models.Hero) string {
 	resp += "\n📜 Биография:\n"
 	resp += h.Biography + "\n"
 
-	resp += "━━━━━━━━━━━━━━━━━━━━"
+	resp += Divider
 
 	return resp
 }
 
 func NewChouseHero(heroes *models.FantasyCharacters) []string {
 	resp := make([]string, len(heroes.Characters))
-	// resp := "🌟 Выберите своего героя из представленных вариантов:\n"
 	for idx, hero := range heroes.Characters {
-		str := "───────────────────────\n"
+		str := Divider
 		str += fmt.Sprintf("🧙‍♂️ Персонаж #%d\n", idx+1)
-		str += "───────────────────────\n"
+		str += Divider
 		if hero.Name != "" {
 			str += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
 		}
@@ -165,9 +171,53 @@ func NewChouseHero(heroes *models.FantasyCharacters) []string {
 		if hero.Biography != "" {
 			str += fmt.Sprintf("📜 Биография: %s\n", hero.Biography)
 		}
-		str += "───────────────────────\n"
+		str += Divider
 		resp[idx] = str
 	}
 	resp[len(resp)-1] = "🌟 Выберите своего героя из представленных вариантов\n"
 	return resp
+}
+
+func CreateHeroMessage(hero *models.Hero) string {
+	var msg string
+	msg += Divider
+	msg += "🏰 Характеристика персонажа\n"
+	msg += Divider
+
+	if hero.Name != "" {
+		msg += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
+	}
+	if hero.Race != "" {
+		msg += fmt.Sprintf("🧬 Раса: %s\n", hero.Race)
+	}
+	if hero.Class != "" {
+		msg += fmt.Sprintf("⚔️ Класс: %s\n", hero.Class)
+	}
+	if hero.Appearance != "" {
+		msg += fmt.Sprintf("🪞 Внешность: %s\n", hero.Appearance)
+	}
+	if len(hero.Traits) > 0 {
+		msg += "💭 Черты характера: "
+		msg += strings.Join(hero.Traits, ", ")
+		msg += "\n"
+	}
+	if hero.Feature != "" {
+		msg += fmt.Sprintf("✨ Особенность: %s\n", hero.Feature)
+	}
+	if hero.Biography != "" {
+		msg += fmt.Sprintf("📜 Биография:\n%s\n", hero.Biography)
+	}
+
+	msg += Divider
+	return msg
+}
+
+func CreateExtensionMessage(ext *models.Extension) string {
+	var msg string
+	msg += Divider
+	msg += "📖 Продолжение истории\n"
+	msg += Divider
+	msg += ext.Narrative
+	msg += Divider
+	return msg
 }

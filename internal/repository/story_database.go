@@ -22,8 +22,8 @@ func NewStoryDatabase(db *database.DBObject) *StoryDatabaseImpl {
 // USERS
 func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) error {
 	query := `
-		INSERT INTO users (ID, chatID, isSub)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (ID, isSub)
+		VALUES ($1, $2)
 		ON CONFLICT(ID) DO NOTHING RETURNING ID 
 	`
 	_, err := s.databaseclient.Pool.Exec(
@@ -140,7 +140,7 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.LimitCount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.NewDailyLimit(userID, 1, 5), nil
+			return models.NewDailyLimit(userID, 0, 5), nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
@@ -148,8 +148,8 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 }
 func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
 	query := `
-		INSERT INTO dailyLimits (userID, count, limitCount)
-		VALUES ($1, $2, $3)
+        INSERT INTO dailyLimits (userID, count, limitCount)
+        VALUES ($1, $2 + 1, $3)
 	`
 	_, err := tx.Exec(ctx, query, dailyLimit.UserID, dailyLimit.Count, dailyLimit.LimitCount)
 	if err != nil {

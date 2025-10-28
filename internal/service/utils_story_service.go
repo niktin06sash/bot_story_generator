@@ -13,7 +13,7 @@ import (
 
 func (s *StoryServiceImpl) incrementOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, LogPlace string) error {
 	var err error
-	if limit.Count == 1 {
+	if limit.Count == 0 {
 		err = s.DBStory.AddDailyLimit(ctx, tx, limit)
 		if err != nil {
 			msg := fmt.Sprintf("AddDailyLimit(%v)", LogPlace)
