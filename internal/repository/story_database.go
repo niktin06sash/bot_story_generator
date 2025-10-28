@@ -22,22 +22,21 @@ func NewStoryDatabase(db *database.DBObject) *StoryDatabaseImpl {
 // USERS
 func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) error {
 	query := `
-		INSERT INTO users (ID, isSub)
-		VALUES ($1, $2)
-		ON CONFLICT(ID) DO NOTHING RETURNING ID 
-	`
-	_, err := s.databaseclient.Pool.Exec(
-		ctx,
-		query,
-		user.ID,
-		user.IsSub,
-	)
+        INSERT INTO users (ID, isSub)
+        VALUES ($1, $2)
+        ON CONFLICT(ID) DO NOTHING 
+        RETURNING ID
+    `
+	var insertedID int64
+	err := s.databaseclient.Pool.QueryRow(ctx, query, user.ID, user.IsSub).Scan(&insertedID)
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("client: user with user_id=%d is already registered", user.ID)
 		}
 		return fmt.Errorf("server: database error: %w", err)
 	}
+
 	return nil
 }
 

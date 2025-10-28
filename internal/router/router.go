@@ -174,9 +174,6 @@ func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int
 func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage) {
 	return r.chan_outbound, r.chan_edit, r.chan_delete
 }
-func (r *StoryRouterImpl) GetEditChan() chan models.EditMessage {
-	return r.chan_edit
-}
 func (r *StoryRouterImpl) CloseCommandChan() {
 	close(r.chan_command)
 }

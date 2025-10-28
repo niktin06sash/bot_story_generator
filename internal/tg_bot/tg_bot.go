@@ -312,6 +312,27 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 			}
 			return
 		case <-bot.ctx.Done():
+			bot.logger.ZapLogger.Info(
+				"context cancelled, deleting loading message",
+				zap.Int64("user_id", userID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+			del := tgbotapi.NewDeleteMessage(userID, sentMsg.MessageID)
+			_, err := bot.api.Request(del)
+			if err != nil {
+				bot.logger.ZapLogger.Error(
+					"failed to delete loading message",
+					zap.Error(err),
+					zap.Int64("user_id", userID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			} else {
+				bot.logger.ZapLogger.Info(
+					"loading message deleted successfully",
+					zap.Int64("user_id", userID),
+					zap.Int("message_id", sentMsg.MessageID),
+				)
+			}
 			return
 		case <-ticker.C:
 			editMsg := tgbotapi.NewEditMessageText(userID, sentMsg.MessageID, inputText[currentIdx])
