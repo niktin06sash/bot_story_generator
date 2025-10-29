@@ -5,7 +5,6 @@ import (
 	"bot_story_generator/internal/text_messages"
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -17,12 +16,10 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 		limit.Count += step
 		err = s.DBStory.AddDailyLimit(ctx, tx, limit)
 		if err != nil {
-			msg := fmt.Sprintf("AddDailyLimit(%v)", LogPlace)
-			s.Logger.ZapLogger.Error(msg, zap.Error(err), zap.Any("userID", limit.UserID))
+			s.Logger.ZapLogger.Error("AddDailyLimit", zap.Error(err), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 			if rollbackErr != nil {
-				msg := fmt.Sprintf("Rollback(%v)", LogPlace)
-				s.Logger.ZapLogger.Error(msg, zap.Error(rollbackErr), zap.Any("userID", limit.UserID))
+				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			}
 			return errors.New(text_messages.TextErrorCreateTask)
 		}
@@ -30,15 +27,40 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 		limit.Count += step
 		err = s.DBStory.UpdateDailyLimit(ctx, tx, limit)
 		if err != nil {
-			msg := fmt.Sprintf("UpdateDailyLimit(%v)", LogPlace)
-			s.Logger.ZapLogger.Error(msg, zap.Error(err), zap.Any("userID", limit.UserID))
+			s.Logger.ZapLogger.Error("UpdateDailyLimit", zap.Error(err), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 			if rollbackErr != nil {
-				msg := fmt.Sprintf("Rollback(%v)", LogPlace)
-				s.Logger.ZapLogger.Error(msg, zap.Error(rollbackErr), zap.Any("userID", limit.UserID))
+				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			}
 			return errors.New(text_messages.TextErrorCreateTask)
 		}
 	}
 	return nil
+}
+func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, LogPlace string) (*models.DailyLimit, error) {
+	isExist, err := s.CStory.CheckExceededLimit(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Warn("CheckExceededLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+	} else if isExist {
+		s.Logger.ZapLogger.Warn("CheckExceededLimit", zap.Error(errors.New("cache: user has exceeded daily action limit")), zap.Any("userID", userID), zap.Any("place", LogPlace))
+		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
+	} else if !isExist {
+		s.Logger.ZapLogger.Info("CheckExceededLimit Exceeded Limits not in cache. Checking in database...", zap.Any("userID", userID), zap.Any("place", LogPlace))
+	}
+	// Проверяем в базе данных, есть ли дневные ходы у пользователя для создания новой истории
+	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetDailyLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+		return nil, errors.New(text_messages.TextErrorCreateTask)
+	}
+	if limit.LimitCount <= limit.Count {
+		s.Logger.ZapLogger.Warn("GetDailyLimit", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID), zap.Any("place", LogPlace))
+		//Добавляем превышение лимита в кэш
+		err := s.CStory.AddExceededLimit(ctx, userID)
+		if err != nil {
+			s.Logger.ZapLogger.Warn("AddExceededLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+		}
+		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
+	}
+	return limit, nil
 }

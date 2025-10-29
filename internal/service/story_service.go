@@ -61,59 +61,39 @@ func NewStoryService(db StoryDatabase, ai StoryAI, cache StoryCache, logger *log
 }
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
+	place := "CreateStory"
 	// Проверяем в кэше, есть ли дневные ходы у пользователя для создания новой истории
-	isExist, err := s.CStory.CheckExceededLimit(ctx, userID)
+	limit, err := s.checkDailyLimits(ctx, userID, place)
 	if err != nil {
-		s.Logger.ZapLogger.Warn("CheckExceededLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
-	} else if isExist {
-		s.Logger.ZapLogger.Warn("CheckExceededLimit(CreateStory)", zap.Error(errors.New("cache: user has exceeded daily action limit")), zap.Any("userID", userID))
-		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
-	} else if !isExist {
-		s.Logger.ZapLogger.Info("CheckExceededLimit(CreateStory) Exceeded Limits not in cache. Checking in database...", zap.Any("userID", userID))
+		return nil, err
 	}
-	// Проверяем в базе данных, есть ли дневные ходы у пользователя для создания новой истории
-	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
-	if err != nil {
-		s.Logger.ZapLogger.Error("GetDailyLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	if limit.LimitCount <= limit.Count {
-		s.Logger.ZapLogger.Warn("GetDailyLimit(CreateStory)", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID))
-		//Добавляем превышение лимита в кэш
-		err := s.CStory.AddExceededLimit(ctx, userID)
-		if err != nil {
-			s.Logger.ZapLogger.Warn("AddExceededLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
-		}
-		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
-	}
-
 	// Проверяем, нет ли активных историй у пользователя в данный момент
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
-		s.Logger.ZapLogger.Error("GetActiveStories(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) > 0 {
-		s.Logger.ZapLogger.Warn("GetActiveStories(CreateStory)", zap.Error(errors.New("client: user already has an active history")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Warn("GetActiveStories", zap.Error(errors.New("client: user already has an active history")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorUserActiveStory)
 	}
 
 	// Запрос в ИИ
 	fantasyCharacters, err := s.AIStory.GetStructuredHeroes(ctx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("GetStructuredHeroes(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	data, err := json.Marshal(fantasyCharacters)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Marshal(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("BeginTx(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
@@ -121,10 +101,10 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	story := models.NewStory(userID, nil)
 	storyId, err := s.DBStory.AddStory(ctx, tx, story)
 	if err != nil {
-		s.Logger.ZapLogger.Error("AddStory(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("AddStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx(CreateStory)", zap.Error(rollbackErr), zap.Any("userID", userID))
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
@@ -133,16 +113,16 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	variant := models.NewStoryVariant(storyId, "characters", data)
 	err = s.DBStory.AddVariant(ctx, tx, variant)
 	if err != nil {
-		s.Logger.ZapLogger.Error("AddVariant(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("AddVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx(CreateStory)", zap.Error(rollbackErr), zap.Any("userID", userID))
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
-	err = s.updateOrAddDailyLimit(ctx, tx, limit, 2, "CreateStory")
+	err = s.updateOrAddDailyLimit(ctx, tx, limit, 2, place)
 	if err != nil {
 		return nil, err
 	}
@@ -150,43 +130,38 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	// Делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты, лимиты)
 	err = s.DBStory.CommitTx(ctx, tx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("CommitTx(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	s.Logger.ZapLogger.Info("Story created successfully(CreateStory)", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("Story created successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return text_messages.NewChouseHero(fantasyCharacters), nil
 }
 
 func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
+	place := "UserChoice"
 	number_choise, err := strconv.Atoi(num)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Invalid user choice(UserChoice)", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num))
+		s.Logger.ZapLogger.Error("Invalid user choice", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
-	// Проверяем лимиты
-	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
+	// Проверяем в кэше, есть ли дневные ходы у пользователя для создания новой истории
+	limit, err := s.checkDailyLimits(ctx, userID, place)
 	if err != nil {
-		s.Logger.ZapLogger.Error("GetDailyLimit(UserChoice)", zap.Error(err), zap.Any("userID", userID))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	if limit.LimitCount <= limit.Count {
-		s.Logger.ZapLogger.Warn("GetDailyLimit(UserChoice)", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID))
-		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
+		return nil, err
 	}
 
 	// Получаем варианты выбора пользователя
 	variants, dbErr := s.DBStory.GetActiveVariants(ctx, userID)
 	if dbErr != nil {
-		s.Logger.ZapLogger.Error("GetActiveVariants(UserChoice)", zap.Error(dbErr), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(dbErr), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(variants) > 1 {
-		s.Logger.ZapLogger.Error("GetActiveVariants(UserChoice)", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(variants) == 0 {
-		s.Logger.ZapLogger.Error("GetActiveVariants(UserChoice)", zap.Error(fmt.Errorf("server: no one active story found")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(fmt.Errorf("server: no one active story found")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	variant := variants[0]
@@ -198,22 +173,22 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		var fantasyCharacters models.FantasyCharacters
 		err = json.Unmarshal(variant.Data, &fantasyCharacters)
 		if err != nil {
-			s.Logger.ZapLogger.Error("Unmarshal(UserChoice)", zap.Error(err), zap.Any("userID", userID))
+			s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
 		userVariant := fantasyCharacters.Characters[number_choise]
 		msg = text_messages.CreateHeroMessage(&userVariant)
-		s.Logger.ZapLogger.Info("Fetched story variant(UserChoice)", zap.Any("variants", userVariant), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variants", userVariant), zap.Any("userID", userID), zap.Any("place", place))
 	case "actions":
 		var storyActions models.StoryChoise
 		err = json.Unmarshal(variant.Data, &storyActions)
 		if err != nil {
-			s.Logger.ZapLogger.Error("Unmarshal(UserChoice)", zap.Error(err), zap.Any("userID", userID))
+			s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
 		userVariant := storyActions.Story[number_choise]
 		msg = text_messages.CreateExtensionMessage(&userVariant)
-		s.Logger.ZapLogger.Info("Fetched action variant(UserChoice)", zap.Any("variant", userVariant), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("place", place))
 	}
 
 	//для начала сделай всю работу с ии и только потом пиши в базу данных, чтобы транзакция не висела и не ждала когда ии нагенерит
@@ -223,7 +198,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	// Генерируем ответ ии
 	allStory, dbErr := s.DBStory.GetAllStorySegments(ctx, userID)
 	if dbErr != nil {
-		s.Logger.ZapLogger.Error("GetAllStorySegments(UserChoice)", zap.Error(dbErr), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(dbErr), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	fullStory := ""
@@ -232,18 +207,18 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	segment, aiErr := s.AIStory.GenerateNextStorySegment(ctx, fullStory)
 	if aiErr != nil {
-		s.Logger.ZapLogger.Error("GenerateNextStorySegment(UserChoice)", zap.Error(aiErr), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(aiErr), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	narrative := segment.Narrative
 	choise := segment.Choices
 
-	s.Logger.ZapLogger.Info("Generated next segment(UserChoice)", zap.Any("userID", userID), zap.String("narrative", narrative), zap.Any("choices", choise))
+	s.Logger.ZapLogger.Info("Generated next segment", zap.Any("userID", userID), zap.String("narrative", narrative), zap.Any("choices", choise), zap.Any("place", place))
 
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("BeginTx(UserChoice)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
@@ -264,7 +239,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	// Делаем подтверждение транзакции после изменения таблиц
 	err = s.DBStory.CommitTx(ctx, tx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("CommitTx(UserChoice)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
@@ -274,53 +249,54 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 }
 
 func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]string, error) {
+	place := "CreateUser"
 	isExist, err := s.CStory.CheckCreatedUser(ctx, userID)
 	if err != nil {
-		s.Logger.ZapLogger.Warn("CheckCreatedUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Warn("CheckCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 	} else if isExist {
-		s.Logger.ZapLogger.Warn("CheckCreatedUser(CreateUser)", zap.Error(errors.New("cache: user is already registered")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Warn("CheckCreatedUser", zap.Error(errors.New("cache: user is already registered")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextGreeting)
 	} else if !isExist {
-		s.Logger.ZapLogger.Info("CheckCreatedUser(CreateUser) Created user not in cache. Trying creating in database...", zap.Any("userID", userID))
+		s.Logger.ZapLogger.Info("CheckCreatedUser Created user not in cache. Trying creating in database...", zap.Any("userID", userID), zap.Any("place", place))
 	}
 	user := models.NewUser(userID)
 	err = s.DBStory.AddUser(ctx, user)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "client: ") {
-			s.Logger.ZapLogger.Warn("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+			s.Logger.ZapLogger.Warn("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 			err := s.CStory.AddCreatedUser(ctx, userID)
 			if err != nil {
-				s.Logger.ZapLogger.Warn("AddCreatedUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+				s.Logger.ZapLogger.Warn("AddCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 			}
 			return nil, errors.New(text_messages.TextGreeting)
 		}
-		s.Logger.ZapLogger.Error("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	err = s.CStory.AddCreatedUser(ctx, userID)
 	if err != nil {
-		s.Logger.ZapLogger.Warn("AddCreatedUser(Createuser)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Warn("AddCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 	}
-	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextGreeting}, nil
 }
 
 func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]string, error) {
-	s.Logger.ZapLogger.Info("Checking active story...", zap.Any("userID", userID))
+	place := "StopStory"
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
-		s.Logger.ZapLogger.Error("GetActiveStories(StopStory)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) > 1 {
-		s.Logger.ZapLogger.Error("GetActiveStories(StopStory)", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) == 0 {
-		s.Logger.ZapLogger.Warn("GetActiveStories(StopStory)", zap.Error(fmt.Errorf("client: user already has not an active history")), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Warn("GetActiveStories", zap.Error(fmt.Errorf("client: user already has not an active history")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextNoActiveStory)
 	}
-	s.Logger.ZapLogger.Info("Check active story successfully", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("Check active story successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextStopActiveStory}, nil
 }
 
@@ -328,12 +304,12 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	if arg == "❌" {
 		return nil, nil
 	}
-	s.Logger.ZapLogger.Info("Stopping active story...", zap.Any("userID", userID))
+	place := "StopStoryChoice"
 	err := s.DBStory.StopStory(ctx, userID)
 	if err != nil {
-		s.Logger.ZapLogger.Error("StopStory(StopStoryChoice)", zap.Error(err), zap.Any("userID", userID))
+		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	s.Logger.ZapLogger.Info("Stop active story successfully", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("Stop active story successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextSuccessStopStory}, nil
 }
