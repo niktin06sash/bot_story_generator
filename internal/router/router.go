@@ -8,6 +8,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"go.uber.org/zap"
 	//* Для будуших логов роутера
 	// "go.uber.org/zap"
 )
@@ -84,6 +86,8 @@ func (r *StoryRouterImpl) routerWorker() {
 			msgID := msg.MsgID
 
 			if data == "start" {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("Creating user...", zap.Any("userID", userID))
 				resp, err := r.service.CreateUser(r.ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(r.ctx, userID, err.Error())
@@ -93,10 +97,11 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if data == "newstory" {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("Creating new story...", zap.Any("userID", userID))
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero)
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
 				resp, err := r.service.CreateStory(r.ctx, userID)
 				if err != nil {
@@ -106,6 +111,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				cancel()
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero)
 				for i := 0; i < len(resp)-1; i++ {
 					r.createOutboundMessage(r.ctx, userID, resp[i])
 				}
@@ -113,6 +119,8 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if strings.HasPrefix(data, "userChoice_") {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("User making a choice...", zap.Any("userID", userID))
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
@@ -132,11 +140,15 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if data == "help" {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("User getting help...", zap.Any("userID", userID))
 				text := text_messages.TextHelp()
 				r.createOutboundMessage(r.ctx, userID, text)
 				r.cleanUserState(userID)
 
 			} else if data == "stopstory" {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("User stopping story...", zap.Any("userID", userID))
 				resp, err := r.service.StopStory(r.ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(r.ctx, userID, err.Error())
@@ -144,8 +156,10 @@ func (r *StoryRouterImpl) routerWorker() {
 					r.createOutboundMessage(r.ctx, userID, resp[0], models.NewButtonArg("stopStoryChoice_", []string{"✅", "❌"}))
 				}
 				r.cleanUserState(userID)
-				
+
 			} else if strings.HasPrefix(data, "stopStoryChoice_") {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("User making a stopStorychoice...", zap.Any("userID", userID))
 				arg := strings.TrimPrefix(data, "stopStoryChoice_")
 				resp, err := r.service.StopStoryChoice(r.ctx, userID, arg)
 				r.createDeleteMessage(userID, msgID)

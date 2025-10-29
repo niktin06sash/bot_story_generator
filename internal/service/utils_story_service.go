@@ -11,9 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *StoryServiceImpl) incrementOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, LogPlace string) error {
+func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, step int, LogPlace string) error {
 	var err error
 	if limit.Count == 0 {
+		limit.Count += step
 		err = s.DBStory.AddDailyLimit(ctx, tx, limit)
 		if err != nil {
 			msg := fmt.Sprintf("AddDailyLimit(%v)", LogPlace)
@@ -26,9 +27,10 @@ func (s *StoryServiceImpl) incrementOrAddDailyLimit(ctx context.Context, tx pgx.
 			return errors.New(text_messages.TextErrorCreateTask)
 		}
 	} else {
-		err = s.DBStory.IncrementDailyLimit(ctx, tx, limit.UserID)
+		limit.Count += step
+		err = s.DBStory.UpdateDailyLimit(ctx, tx, limit)
 		if err != nil {
-			msg := fmt.Sprintf("IncrementDailyLimit(%v)", LogPlace)
+			msg := fmt.Sprintf("UpdateDailyLimit(%v)", LogPlace)
 			s.Logger.ZapLogger.Error(msg, zap.Error(err), zap.Any("userID", limit.UserID))
 			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 			if rollbackErr != nil {

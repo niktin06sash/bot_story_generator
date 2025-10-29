@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot_story_generator/internal/ai"
+	"bot_story_generator/internal/cache"
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/database"
 	"bot_story_generator/internal/logger"
@@ -37,9 +38,9 @@ func main() {
 	logger.ZapLogger.Info("Successful load config")
 
 	//база данных(подключение + методы репозитория)
-	pgx, err := database.NewDBObject(cfg.Database, logger)
+	pgx, err := database.NewDBObject(cfg, logger)
 	if err != nil {
-		// Добавть обработку ошибки подключения к базе данных
+		return
 	}
 	defer pgx.Close()
 
@@ -56,8 +57,15 @@ func main() {
 
 	aiB := ai.NewStoryAI(aiConn)
 
+	//кэширование(подключение + методы кэширования)
+	redis, err := cache.NewRedisConnection(cfg, logger)
+	if err != nil {
+		return
+	}
+	defer redis.Close()
+	storyCache := repository.NewStoryCache(redis)
 	//бизнес-логика(база данных + ии)
-	storyService := service.NewStoryService(storyDatabase, aiB, logger)
+	storyService := service.NewStoryService(storyDatabase, aiB, storyCache, logger)
 
 	//роутер
 	router := router.NewRouter(cfg, storyService, logger)

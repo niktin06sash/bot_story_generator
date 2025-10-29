@@ -14,13 +14,13 @@ import (
 
 type StoryDatabaseImpl struct {
 	databaseclient *database.DBObject
-	TokenDayLimit int
+	tokenDayLimit  int
 }
 
 func NewStoryDatabase(cfg *config.Config, db *database.DBObject) *StoryDatabaseImpl {
 	return &StoryDatabaseImpl{
 		databaseclient: db,
-		TokenDayLimit:  cfg.Setting.TokenDayLimit,
+		tokenDayLimit:  cfg.Setting.TokenDayLimit,
 	}
 }
 
@@ -37,7 +37,7 @@ func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) erro
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("client: user with user_id=%d is already registered", user.ID)
+			return errors.New("client: user is already registered")
 		}
 		return fmt.Errorf("server: database error: %w", err)
 	}
@@ -144,7 +144,7 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.LimitCount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.NewDailyLimit(userID, 0, s.TokenDayLimit), nil
+			return models.NewDailyLimit(userID, 0, s.tokenDayLimit), nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
@@ -163,14 +163,13 @@ func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyL
 	return nil
 }
 
-//TODO Добавить возможность выбирать на сколько увеличить лимит
-func (s *StoryDatabaseImpl) IncrementDailyLimit(ctx context.Context, tx pgx.Tx, userID int64) error {
+func (s *StoryDatabaseImpl) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
 	query := `
         UPDATE dailyLimits 
-        SET count = count + 1
-        WHERE userID = $1 AND date = CURRENT_DATE
+        SET count = $1
+        WHERE userID = $2 AND date = CURRENT_DATE
     `
-	_, err := tx.Exec(ctx, query, userID)
+	_, err := tx.Exec(ctx, query, dailyLimit.Count, dailyLimit.UserID)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}

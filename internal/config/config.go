@@ -13,10 +13,16 @@ type Config struct {
 	Telegram   TelegramConfig
 	AI         AIConfig
 	Database   DatabaseConfig
+	Cache      CacheConfig
 	NumWorkers int
 	Setting    BotSetting
 }
-
+type CacheConfig struct {
+	Host     string
+	Port     int
+	Password string
+	DB       int
+}
 type TelegramConfig struct {
 	BotToken string
 	BotDebug bool
@@ -94,7 +100,19 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	//потом как буду хостить redis, скажу какие точно параметры нужны для подключения
+	cachehost := os.Getenv("CACHE_HOST")
+	cacheport := os.Getenv("CACHE_PORT")
+	portnum, err := strconv.Atoi(cacheport)
+	if err != nil {
+		return nil, err
+	}
+	cachepassword := os.Getenv("CACHE_PASSWORD")
+	cachedb := os.Getenv("CACHE_DB")
+	cachedbnum, err := strconv.Atoi(cachedb)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Telegram: TelegramConfig{
 			BotToken: botToken,
@@ -115,6 +133,12 @@ func NewConfig() (*Config, error) {
 		NumWorkers: num,
 		Setting: BotSetting{
 			TokenDayLimit: numTokenLimit,
+		},
+		Cache: CacheConfig{
+			Host:     cachehost,
+			Port:     portnum,
+			Password: cachepassword,
+			DB:       cachedbnum,
 		},
 	}
 

@@ -34,7 +34,7 @@ type StoryDatabase interface {
 
 	GetDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error)
 	AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
-	IncrementDailyLimit(ctx context.Context, tx pgx.Tx, userID int64) error
+	UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
 
 	GetAllStorySegments(ctx context.Context, userID int64) (*models.AllStorySegments, error)
 }
@@ -43,21 +43,35 @@ type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
 	GenerateNextStorySegment(parctx context.Context, storyData string) (*models.StoryNode, error)
 }
-
+type StoryCache interface {
+	AddCreatedUser(ctx context.Context, userID int64) error
+	CheckCreatedUser(ctx context.Context, userID int64) (bool, error)
+	AddExceededLimit(ctx context.Context, userID int64) error
+	CheckExceededLimit(ctx context.Context, userID int64) (bool, error)
+}
 type StoryServiceImpl struct {
 	DBStory StoryDatabase
 	AIStory StoryAI
+	CStory  StoryCache
 	Logger  *logger.Logger
 }
 
-func NewStoryService(db StoryDatabase, ai StoryAI, logger *logger.Logger) *StoryServiceImpl {
-	return &StoryServiceImpl{DBStory: db, AIStory: ai, Logger: logger}
+func NewStoryService(db StoryDatabase, ai StoryAI, cache StoryCache, logger *logger.Logger) *StoryServiceImpl {
+	return &StoryServiceImpl{DBStory: db, AIStory: ai, CStory: cache, Logger: logger}
 }
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
-	s.Logger.ZapLogger.Info("Creating new story", zap.Any("userID", userID))
-
-	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
+	// Проверяем в кэше, есть ли дневные ходы у пользователя для создания новой истории
+	isExist, err := s.CStory.CheckExceededLimit(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Warn("CheckExceededLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+	} else if isExist {
+		s.Logger.ZapLogger.Warn("CheckExceededLimit(CreateStory)", zap.Error(errors.New("cache: user has exceeded daily action limit")), zap.Any("userID", userID))
+		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
+	} else if !isExist {
+		s.Logger.ZapLogger.Info("CheckExceededLimit(CreateStory) Exceeded Limits not in cache. Checking in database...", zap.Any("userID", userID))
+	}
+	// Проверяем в базе данных, есть ли дневные ходы у пользователя для создания новой истории
 	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetDailyLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
@@ -65,6 +79,11 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	}
 	if limit.LimitCount <= limit.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit(CreateStory)", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID))
+		//Добавляем превышение лимита в кэш
+		err := s.CStory.AddExceededLimit(ctx, userID)
+		if err != nil {
+			s.Logger.ZapLogger.Warn("AddExceededLimit(CreateStory)", zap.Error(err), zap.Any("userID", userID))
+		}
 		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
 	}
 
@@ -123,7 +142,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	}
 
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
-	err = s.incrementOrAddDailyLimit(ctx, tx, limit, "CreateStory")
+	err = s.updateOrAddDailyLimit(ctx, tx, limit, 2, "CreateStory")
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +158,6 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 }
 
 func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
-	s.Logger.ZapLogger.Info("User making a choice", zap.Any("userID", userID), zap.String("choice", num))
 	number_choise, err := strconv.Atoi(num)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Invalid user choice(UserChoice)", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num))
@@ -221,7 +239,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	choise := segment.Choices
 
 	s.Logger.ZapLogger.Info("Generated next segment(UserChoice)", zap.Any("userID", userID), zap.String("narrative", narrative), zap.Any("choices", choise))
-	
+
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
@@ -238,7 +256,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	//TODO отправляем сообщение юзеру с вариантами ответа
 
 	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
-	err = s.incrementOrAddDailyLimit(ctx, tx, limit, "UserChoice")
+	err = s.updateOrAddDailyLimit(ctx, tx, limit, 1, "UserChoice")
 	if err != nil {
 		return nil, err
 	}
@@ -256,23 +274,39 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 }
 
 func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]string, error) {
-	s.Logger.ZapLogger.Info("Creating user", zap.Any("userID", userID))
+	isExist, err := s.CStory.CheckCreatedUser(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Warn("CheckCreatedUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+	} else if isExist {
+		s.Logger.ZapLogger.Warn("CheckCreatedUser(CreateUser)", zap.Error(errors.New("cache: user is already registered")), zap.Any("userID", userID))
+		return nil, errors.New(text_messages.TextGreeting)
+	} else if !isExist {
+		s.Logger.ZapLogger.Info("CheckCreatedUser(CreateUser) Created user not in cache. Trying creating in database...", zap.Any("userID", userID))
+	}
 	user := models.NewUser(userID)
-	err := s.DBStory.AddUser(ctx, user)
+	err = s.DBStory.AddUser(ctx, user)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "client: ") {
 			s.Logger.ZapLogger.Warn("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+			err := s.CStory.AddCreatedUser(ctx, userID)
+			if err != nil {
+				s.Logger.ZapLogger.Warn("AddCreatedUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
+			}
 			return nil, errors.New(text_messages.TextGreeting)
 		}
 		s.Logger.ZapLogger.Error("AddUser(CreateUser)", zap.Error(err), zap.Any("userID", userID))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
+	}
+	err = s.CStory.AddCreatedUser(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Warn("AddCreatedUser(Createuser)", zap.Error(err), zap.Any("userID", userID))
 	}
 	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID))
 	return []string{text_messages.TextGreeting}, nil
 }
 
 func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]string, error) {
-	s.Logger.ZapLogger.Info("Checking active story", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("Checking active story...", zap.Any("userID", userID))
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveStories(StopStory)", zap.Error(err), zap.Any("userID", userID))
@@ -294,7 +328,7 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	if arg == "❌" {
 		return nil, nil
 	}
-	s.Logger.ZapLogger.Info("Stopping active story", zap.Any("userID", userID))
+	s.Logger.ZapLogger.Info("Stopping active story...", zap.Any("userID", userID))
 	err := s.DBStory.StopStory(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("StopStory(StopStoryChoice)", zap.Error(err), zap.Any("userID", userID))

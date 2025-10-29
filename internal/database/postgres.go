@@ -10,10 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewDBObject(cfg config.DatabaseConfig, logger *logger.Logger) (*DBObject, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ConnectTimeout)
+func NewDBObject(cfg *config.Config, logger *logger.Logger) (*DBObject, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
 	defer cancel()
-	poolConfig, err := pgxpool.ParseConfig(cfg.URL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
 		logger.ZapLogger.Error("Failed to parse Postgres-connection string", zap.Error(err))
 		return nil, err
