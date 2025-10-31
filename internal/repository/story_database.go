@@ -68,6 +68,7 @@ func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) 
 	}
 	return stories, nil
 }
+
 func (s *StoryDatabaseImpl) AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error) {
 	query := `
 		INSERT INTO stories (userID, data)
@@ -82,6 +83,25 @@ func (s *StoryDatabaseImpl) AddStory(ctx context.Context, tx pgx.Tx, story *mode
 	}
 	return storyID, nil
 }
+
+func (s *StoryDatabaseImpl) GetActiveStoryID(ctx context.Context, userID int64) (int, error) {
+	query := `
+	    SELECT id
+	    FROM stories
+	    WHERE userID = $1 AND isActive = TRUE
+	    LIMIT 1
+	`
+	var storyID int
+	err := s.databaseclient.Pool.QueryRow(ctx, query, userID).Scan(&storyID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, errors.New("no active story found for given userID")
+		}
+		return 0, fmt.Errorf("server: database error: %w", err)
+	}
+	return storyID, nil
+}
+
 func (s *StoryDatabaseImpl) StopStory(ctx context.Context, userID int64) error {
 	query := `
 		UPDATE stories 
@@ -108,6 +128,20 @@ func (s *StoryDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant *
 	}
 	return nil
 }
+
+func (s *StoryDatabaseImpl) UpdateVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error {
+	query := `
+		UPDATE storiesVariants
+		SET data = $2, type = $3
+		WHERE storyID = $1
+	`
+	_, err := tx.Exec(ctx, query, variant.StoryID, variant.Data, variant.Type)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}
+
 func (s *StoryDatabaseImpl) GetActiveVariants(ctx context.Context, userID int64) ([]*models.StoryVariant, error) {
 	query := `
 		SELECT sv.storyid, sv.data, sv.type
@@ -177,7 +211,48 @@ func (s *StoryDatabaseImpl) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dai
 }
 
 // MESSAGES
+func (s *StoryDatabaseImpl) AddStoryMessages(ctx context.Context, userID int64, data string) error {
+	query := `
+		INSERT INTO storiesMessages (storyID, data)
+		SELECT id, $2
+		FROM stories
+		WHERE userID = $1 AND isActive = true
+		LIMIT 1;
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, data)
+	if err != nil {
+		return fmt.Errorf("failed to add story message: %w", err)
+	}
+	return nil
+}
+
 func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, userID int64) (*models.AllStorySegments, error) {
-	//! ТЕСТ
-	return &models.AllStorySegments{StorySegments: []string{""}}, nil
+	query := `
+		SELECT sm.data
+		FROM storiesMessages sm
+		INNER JOIN stories s ON sm.storyID = s.ID
+		WHERE s.userID = $1 AND s.isActive = TRUE
+		ORDER BY sm.createdAt ASC
+	`
+
+	rows, err := s.databaseclient.Pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch story segments: %w", err)
+	}
+	defer rows.Close()
+
+	var segments []string
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("failed to scan story segment: %w", err)
+		}
+		segments = append(segments, data)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row error fetching story segments: %w", err)
+	}
+
+	return &models.AllStorySegments{StorySegments: segments}, nil
 }

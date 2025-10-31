@@ -53,19 +53,19 @@ var TextErrorCreateTask = `
 Похоже, магия дала сбой.  
 Попробуй выбрать действие ещё раз чуть позже.`
 
-// надо будет поменять ответ
+// TODO надо будет поменять ответ
 var TextErrorUserActiveStory = `Уже есть активная история. Сначала завершите текущую!`
 
-// надо будет поменять ответ
+// TODO надо будет поменять ответ
 var TextStopActiveStory = `Вы действительно хотите завершить текущую историю?`
 
-// надо будет поменять ответ
+// TODO надо будет поменять ответ
 var TextNoActiveStory = `У вас нет активной истории. Воспользуйтесь командой /newstory`
 
-// надо будет поменять ответ
+// TODO надо будет поменять ответ
 var TextSuccessStopStory = `Вы успешно завершили историю. Для создания новой воспользуйтесь кнопкой /newstory`
 
-// надо будет поменять ответ
+// TODO надо будет поменять ответ
 var TextErrorUserDailyLimit = `Превышен лимит дневных ходов. Возвращайтесь завтра!`
 
 func TextHelp() string {
@@ -138,7 +138,8 @@ func FormatHeroDescription(h models.Hero) string {
 }
 
 func NewChouseHero(heroes *models.FantasyCharacters) []string {
-	resp := make([]string, len(heroes.Characters))
+	// Создаем массив на 1 элемент больше для текста выбора
+	resp := make([]string, len(heroes.Characters)+1)
 	for idx, hero := range heroes.Characters {
 		str := Divider
 		str += fmt.Sprintf("🧙‍♂️ Персонаж #%d\n", idx+1)
@@ -174,7 +175,8 @@ func NewChouseHero(heroes *models.FantasyCharacters) []string {
 		str += Divider
 		resp[idx] = str
 	}
-	resp[len(resp)-1] = "🌟 Выберите своего героя из представленных вариантов\n"
+	// Текст выбора в последнем элементе, не перезаписывая персонажей
+	resp[len(heroes.Characters)] = "🌟 Выберите своего героя из представленных вариантов\n"
 	return resp
 }
 
@@ -217,7 +219,7 @@ func CreateExtensionMessage(ext *models.Extension) string {
 	msg += Divider
 	msg += "📖 Продолжение истории\n"
 	msg += Divider
-	msg += ext.Narrative
+	msg += ext.Narrative + "\n"
 	msg += Divider
 	return msg
 }

@@ -10,8 +10,6 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
-	//* Для будуших логов роутера
-	// "go.uber.org/zap"
 )
 
 type StoryService interface {
@@ -112,9 +110,15 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				cancel()
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero)
+				if len(resp) == 0 {
+					r.logger.ZapLogger.Error("Empty response from CreateStory", zap.Any("userID", userID))
+					continue
+				}
+				// Выводим всех персонажей (первые len(resp)-1 элементов)
 				for i := 0; i < len(resp)-1; i++ {
 					r.createOutboundMessage(r.ctx, userID, resp[i])
 				}
+				// Последний элемент - текст с кнопками выбора
 				r.createOutboundMessage(r.ctx, userID, resp[len(resp)-1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
 
