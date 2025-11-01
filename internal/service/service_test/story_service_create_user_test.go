@@ -14,11 +14,12 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func TestCreateUser_Success(t *testing.T) {
+func TestCreateUser(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockdb := mock_service.NewMockStoryDatabase(ctrl)
 	mockai := mock_service.NewMockStoryAI(ctrl)
+	mockcache := mock_service.NewMockStoryCache(ctrl)
 	log, _ := logger.NewLogger()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -26,48 +27,60 @@ func TestCreateUser_Success(t *testing.T) {
 		DBStory: mockdb,
 		AIStory: mockai,
 		Logger:  log,
+		CStory:  mockcache,
 	}
-	user := models.NewUser(1, 1)
-	mockdb.EXPECT().AddUser(ctx, user).Return(nil)
-	response, err := serv.CreateUser(ctx, 1, 1)
-	require.Nil(t, err)
-	require.Equal(t, response, text_messages.TextGreeting)
-}
-func TestCreateUser_ClientError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockdb := mock_service.NewMockStoryDatabase(ctrl)
-	mockai := mock_service.NewMockStoryAI(ctrl)
-	log, _ := logger.NewLogger()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	serv := &service.StoryServiceImpl{
-		DBStory: mockdb,
-		AIStory: mockai,
-		Logger:  log,
+	userID := int64(1)
+	user := models.NewUser(userID)
+	tests := []struct {
+		name             string
+		setupMocks       func()
+		expectedResponse []string
+		expectedError    error
+	}{
+		{
+			name: "Success",
+			setupMocks: func() {
+				mockcache.EXPECT().CheckCreatedUser(ctx, userID).Return(false, nil)
+				mockdb.EXPECT().AddUser(ctx, user).Return(nil)
+			},
+			expectedResponse: []string{text_messages.TextGreeting},
+			expectedError:    nil,
+		},
+		{
+			name: "DB client error",
+			setupMocks: func() {
+				mockcache.EXPECT().CheckCreatedUser(ctx, userID).Return(false, nil)
+				mockdb.EXPECT().AddUser(ctx, user).Return(errors.New("client: user is already registered"))
+				mockcache.EXPECT().AddCreatedUser(ctx, userID).Return(nil)
+			},
+			expectedResponse: nil,
+			expectedError:    errors.New(text_messages.TextGreeting),
+		},
+		{
+			name: "DB server error",
+			setupMocks: func() {
+				mockcache.EXPECT().CheckCreatedUser(ctx, userID).Return(false, nil)
+				mockdb.EXPECT().AddUser(ctx, user).Return(errors.New("server: database error: internal error"))
+			},
+			expectedResponse: nil,
+			expectedError:    errors.New(text_messages.TextErrorCreateTask),
+		},
+		{
+			name: "Cache already has user",
+			setupMocks: func() {
+				mockcache.EXPECT().CheckCreatedUser(ctx, userID).Return(true, nil)
+			},
+			expectedResponse: nil,
+			expectedError:    errors.New(text_messages.TextGreeting),
+		},
 	}
-	user := models.NewUser(1, 1)
-	mockdb.EXPECT().AddUser(ctx, user).Return(errors.New("client: user with user_id=1 is already registered"))
-	response, err := serv.CreateUser(ctx, 1, 1)
-	require.NotNil(t, err)
-	require.Equal(t, response, text_messages.TextHelp())
-}
-func TestCreateUser_ServerError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockdb := mock_service.NewMockStoryDatabase(ctrl)
-	mockai := mock_service.NewMockStoryAI(ctrl)
-	log, _ := logger.NewLogger()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	serv := &service.StoryServiceImpl{
-		DBStory: mockdb,
-		AIStory: mockai,
-		Logger:  log,
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setupMocks()
+			response, err := serv.CreateUser(ctx, userID)
+			require.Equal(t, tt.expectedError, err)
+			require.Equal(t, tt.expectedResponse, response)
+		})
 	}
-	user := models.NewUser(1, 1)
-	mockdb.EXPECT().AddUser(ctx, user).Return(errors.New("server: database error: internal error"))
-	response, err := serv.CreateUser(ctx, 1, 1)
-	require.NotNil(t, err)
-	require.Equal(t, response, text_messages.TextErrorCreateTask)
 }

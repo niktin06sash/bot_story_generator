@@ -3,9 +3,9 @@ package ai
 import (
 	"bot_story_generator/internal/models"
 
-	"fmt"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/openai/openai-go/v3"
 )
@@ -60,7 +60,7 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 	return &fantasyCharacters, nil
 }
 
-func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyData *models.AllStorySegments) (*models.StoryNode, error) {
+func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyData []*models.StoryMessage) (*models.StoryNode, error) {
 	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
 	defer cancel()
 
@@ -70,26 +70,26 @@ func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyDat
 		Schema:      models.StoryScriptResponseSchema,
 		Strict:      openai.Bool(true),
 	}
-	
-	var messages []openai.ChatCompletionMessageParamUnion
+	//Избавляемся от переаллокации append
+	messages := make([]openai.ChatCompletionMessageParamUnion, len(storyData)+1)
 
 	// 1. Добавляем правила игры
-	messages = append(messages, openai.SystemMessage(ah.conn.main_game_rules_promt))
+	messages[0] = openai.SystemMessage(ah.conn.main_game_rules_promt)
 
 	// 2. Проходим по всей хронологии из БД
-	for _, entry := range storyData.StorySegments {
-		switch entry.Type {
+	for i := 1; i < len(messages); i++ {
+		msg := storyData[i-1]
+		switch msg.Type {
 		case "user":
-			messages = append(messages, openai.UserMessage(entry.Data))
+			messages[i] = openai.UserMessage(msg.Data)
 		case "assistant":
-			messages = append(messages, openai.AssistantMessage(entry.Data))
+			messages[i] = openai.AssistantMessage(msg.Data)
 		default:
 			return nil, fmt.Errorf("invalid story segment type")
 		}
 	}
-
 	params := openai.ChatCompletionNewParams{
-		Model: openai.ChatModel(ah.conn.model),
+		Model:    openai.ChatModel(ah.conn.model),
 		Messages: messages,
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{

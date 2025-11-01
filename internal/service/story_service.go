@@ -28,7 +28,6 @@ type StoryDatabase interface {
 	GetActiveStories(ctx context.Context, userID int64) ([]*models.Story, error)
 	StopStory(ctx context.Context, userID int64) error
 	AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error)
-	GetActiveStoryID(ctx context.Context, userID int64) (int, error)
 
 	AddVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error
 	UpdateVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error
@@ -38,12 +37,12 @@ type StoryDatabase interface {
 	AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
 	UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
 
-	AddStoryMessages(ctx context.Context, userID int64, data string, msgType string) error
-	GetAllStorySegments(ctx context.Context, userID int64) (*models.AllStorySegments, error)
+	AddStoryMessages(ctx context.Context, tx pgx.Tx, msgs []*models.StoryMessage) error
+	GetAllStorySegments(ctx context.Context, storyID int) ([]*models.StoryMessage, error)
 }
 type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
-	GenerateNextStorySegment(parctx context.Context, storyData *models.AllStorySegments) (*models.StoryNode, error)
+	GenerateNextStorySegment(parctx context.Context, storyData []*models.StoryMessage) (*models.StoryNode, error)
 }
 type StoryCache interface {
 	AddCreatedUser(ctx context.Context, userID int64) error
@@ -64,7 +63,7 @@ func NewStoryService(db StoryDatabase, ai StoryAI, cache StoryCache, logger *log
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	place := "CreateStory"
-	// Проверяем в кэше, есть ли дневные ходы у пользователя для создания новой истории
+	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
 	limit, err := s.checkDailyLimits(ctx, userID, place)
 	if err != nil {
 		return nil, err
@@ -128,7 +127,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
-	// Создаем начальный дневной лимит или увеличиваем на один(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
+	// Создаем начальный дневной лимит или обновляем(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
 	err = s.updateOrAddDailyLimit(ctx, tx, limit, 2, place)
 	if err != nil {
 		return nil, err
@@ -147,20 +146,20 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
 	place := "UserChoice"
 	number_choice, err := strconv.Atoi(num)
-	if err != nil {
+	if err != nil || number_choice < 1 {
 		s.Logger.ZapLogger.Error("Invalid user choice", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	// Проверяем в кэше, есть ли дневные ходы у пользователя для создания новой истории
+	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
 	limit, err := s.checkDailyLimits(ctx, userID, place)
 	if err != nil {
 		return nil, err
 	}
 
 	// Получаем варианты (последний актвный storyVariant для пользователя)
-	variants, dbErr := s.DBStory.GetActiveVariants(ctx, userID)
-	if dbErr != nil {
-		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(dbErr), zap.Any("userID", userID), zap.Any("place", place))
+	variants, err := s.DBStory.GetActiveVariants(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(variants) > 1 {
@@ -172,12 +171,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	variant := variants[0]
-
-	if number_choice < 1 {
-		s.Logger.ZapLogger.Error("User choice is invalid", zap.Int("choice", number_choice), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
+	storyID := variant.StoryID
 	var msg string
 	switch variant.Type {
 	case "characters":
@@ -195,7 +189,6 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 			s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
-		// Преобразуем строку выбора в Extension
 		userVariant := models.Extension{Narrative: choices[number_choice-1]}
 		msg = text_messages.CreateExtensionMessage(&userVariant)
 		s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("place", place))
@@ -205,26 +198,26 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	//TODO генерим ответ ии - вынести в другую функцию потом
-
 	// Получаем все сегменты истории
-	allStory, dbErr := s.DBStory.GetAllStorySegments(ctx, userID)
-	if dbErr != nil {
-		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(dbErr), zap.Any("userID", userID), zap.Any("place", place))
+	//Пояснишь, чем именно структура AllStorySegments отличается от StoryMessage и почему именно ее использовать надо в ИИ?(Я сделал с StoryMessage)
+	allStory, err := s.DBStory.GetAllStorySegments(ctx, storyID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
 	// Добавляем выбор пользователя в формат истории, в бд добавим потом, во время транзакции
-	storySegment := models.StorySegment{Data: msg, Type: "user"}
-	allStory.StorySegments = append(allStory.StorySegments, storySegment)
-	
+	storySegment := &models.StoryMessage{Data: msg, Type: "user"}
+	allStory = append(allStory, storySegment)
+
 	// Генериуем ответ ии
-	segment, aiErr := s.AIStory.GenerateNextStorySegment(ctx, allStory)
-	if aiErr != nil {
-		s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(aiErr), zap.Any("userID", userID), zap.Any("place", place))
+	segment, err := s.AIStory.GenerateNextStorySegment(ctx, allStory)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	narrative := segment.Narrative
-	choise := segment.Choices
+	choice := segment.Choices
 
 	// Создание транзакции для консистентности данных
 	tx, err := s.DBStory.BeginTx(ctx)
@@ -232,45 +225,41 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
-	// Сохраняем выбор пользователя
-	if err := s.DBStory.AddStoryMessages(ctx, userID, msg, "user"); err != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
-		s.Logger.ZapLogger.Error("AddStoryMessages (msg)", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
-	// Сохраняем повестование
-	if err := s.DBStory.AddStoryMessages(ctx, userID, narrative, "assistant"); err != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
-		s.Logger.ZapLogger.Error("AddStoryMessages (narrative)", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
-	// Сохраняем варианты выбора
-	choicesData, err := json.Marshal(choise)
+	newUserMsg := models.NewStoryMessage(storyID, msg, "user")
+	newAssistantMsg := models.NewStoryMessage(storyID, narrative, "assistant")
+	// Сохраняем сообщения
+	err = s.DBStory.AddStoryMessages(ctx, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
 	if err != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
-		s.Logger.ZapLogger.Error("Marshal choices", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("AddStoryMessages", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
+		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	storyId, err := s.DBStory.GetActiveStoryID(ctx, userID)
+	// Обновляем вариант
+	choicesData, err := json.Marshal(choice)
 	if err != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
-		s.Logger.ZapLogger.Error("GetActiveStoryID", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
+		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	addingVariant := models.NewStoryVariant(storyId, "actions", choicesData)
-	if dbErr = s.DBStory.UpdateVariant(ctx, tx, addingVariant); dbErr != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
-		s.Logger.ZapLogger.Error("UpdateVariant (choices)", zap.Error(dbErr), zap.Any("userID", userID), zap.Any("place", place))
+	addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
+	if err = s.DBStory.UpdateVariant(ctx, tx, addingVariant); err != nil {
+		s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
+		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
 	// Обновляем дневной лимит
 	err = s.updateOrAddDailyLimit(ctx, tx, limit, 1, place)
 	if err != nil {
-		_ = s.DBStory.RollbackTx(ctx, tx)
 		return nil, err
 	}
 
@@ -282,7 +271,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	// Формируем ответ
-	resp := text_messages.TextNarrativeWithChoices(narrative, choise)
+	resp := text_messages.TextNarrativeWithChoices(narrative, choice)
 	return []string{msg, resp}, nil
 }
 
@@ -310,10 +299,6 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 		}
 		s.Logger.ZapLogger.Error("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	err = s.CStory.AddCreatedUser(ctx, userID)
-	if err != nil {
-		s.Logger.ZapLogger.Warn("AddCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 	}
 	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextGreeting}, nil

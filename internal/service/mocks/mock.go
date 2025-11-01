@@ -42,6 +42,20 @@ func (m *MockStoryDatabase) EXPECT() *MockStoryDatabaseMockRecorder {
 	return m.recorder
 }
 
+// AddDailyLimit mocks base method.
+func (m *MockStoryDatabase) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddDailyLimit", ctx, tx, dailyLimit)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddDailyLimit indicates an expected call of AddDailyLimit.
+func (mr *MockStoryDatabaseMockRecorder) AddDailyLimit(ctx, tx, dailyLimit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddDailyLimit", reflect.TypeOf((*MockStoryDatabase)(nil).AddDailyLimit), ctx, tx, dailyLimit)
+}
+
 // AddStory mocks base method.
 func (m *MockStoryDatabase) AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error) {
 	m.ctrl.T.Helper()
@@ -55,6 +69,20 @@ func (m *MockStoryDatabase) AddStory(ctx context.Context, tx pgx.Tx, story *mode
 func (mr *MockStoryDatabaseMockRecorder) AddStory(ctx, tx, story any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddStory", reflect.TypeOf((*MockStoryDatabase)(nil).AddStory), ctx, tx, story)
+}
+
+// AddStoryMessages mocks base method.
+func (m *MockStoryDatabase) AddStoryMessages(ctx context.Context, tx pgx.Tx, msgs []*models.StoryMessage) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddStoryMessages", ctx, tx, msgs)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddStoryMessages indicates an expected call of AddStoryMessages.
+func (mr *MockStoryDatabaseMockRecorder) AddStoryMessages(ctx, tx, msgs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddStoryMessages", reflect.TypeOf((*MockStoryDatabase)(nil).AddStoryMessages), ctx, tx, msgs)
 }
 
 // AddUser mocks base method.
@@ -100,20 +128,6 @@ func (mr *MockStoryDatabaseMockRecorder) BeginTx(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BeginTx", reflect.TypeOf((*MockStoryDatabase)(nil).BeginTx), ctx)
 }
 
-// CheckActiveStories mocks base method.
-func (m *MockStoryDatabase) CheckActiveStories(ctx context.Context, userID int64) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckActiveStories", ctx, userID)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// CheckActiveStories indicates an expected call of CheckActiveStories.
-func (mr *MockStoryDatabaseMockRecorder) CheckActiveStories(ctx, userID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckActiveStories", reflect.TypeOf((*MockStoryDatabase)(nil).CheckActiveStories), ctx, userID)
-}
-
 // CommitTx mocks base method.
 func (m *MockStoryDatabase) CommitTx(ctx context.Context, tx pgx.Tx) error {
 	m.ctrl.T.Helper()
@@ -128,19 +142,64 @@ func (mr *MockStoryDatabaseMockRecorder) CommitTx(ctx, tx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitTx", reflect.TypeOf((*MockStoryDatabase)(nil).CommitTx), ctx, tx)
 }
 
-// GetAllStorySegments mocks base method.
-func (m *MockStoryDatabase) GetAllStorySegments(ctx context.Context, chatID int64) (*models.AllStorySegments, error) {
+// GetActiveStories mocks base method.
+func (m *MockStoryDatabase) GetActiveStories(ctx context.Context, userID int64) ([]*models.Story, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAllStorySegments", ctx, chatID)
-	ret0, _ := ret[0].(*models.AllStorySegments)
+	ret := m.ctrl.Call(m, "GetActiveStories", ctx, userID)
+	ret0, _ := ret[0].([]*models.Story)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetActiveStories indicates an expected call of GetActiveStories.
+func (mr *MockStoryDatabaseMockRecorder) GetActiveStories(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetActiveStories", reflect.TypeOf((*MockStoryDatabase)(nil).GetActiveStories), ctx, userID)
+}
+
+// GetActiveVariants mocks base method.
+func (m *MockStoryDatabase) GetActiveVariants(ctx context.Context, userID int64) ([]*models.StoryVariant, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetActiveVariants", ctx, userID)
+	ret0, _ := ret[0].([]*models.StoryVariant)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetActiveVariants indicates an expected call of GetActiveVariants.
+func (mr *MockStoryDatabaseMockRecorder) GetActiveVariants(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetActiveVariants", reflect.TypeOf((*MockStoryDatabase)(nil).GetActiveVariants), ctx, userID)
+}
+
+// GetAllStorySegments mocks base method.
+func (m *MockStoryDatabase) GetAllStorySegments(ctx context.Context, storyID int) ([]*models.StoryMessage, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllStorySegments", ctx, storyID)
+	ret0, _ := ret[0].([]*models.StoryMessage)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetAllStorySegments indicates an expected call of GetAllStorySegments.
-func (mr *MockStoryDatabaseMockRecorder) GetAllStorySegments(ctx, chatID any) *gomock.Call {
+func (mr *MockStoryDatabaseMockRecorder) GetAllStorySegments(ctx, storyID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllStorySegments", reflect.TypeOf((*MockStoryDatabase)(nil).GetAllStorySegments), ctx, chatID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllStorySegments", reflect.TypeOf((*MockStoryDatabase)(nil).GetAllStorySegments), ctx, storyID)
+}
+
+// GetDailyLimit mocks base method.
+func (m *MockStoryDatabase) GetDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDailyLimit", ctx, userID)
+	ret0, _ := ret[0].(*models.DailyLimit)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDailyLimit indicates an expected call of GetDailyLimit.
+func (mr *MockStoryDatabaseMockRecorder) GetDailyLimit(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDailyLimit", reflect.TypeOf((*MockStoryDatabase)(nil).GetDailyLimit), ctx, userID)
 }
 
 // RollbackTx mocks base method.
@@ -155,6 +214,48 @@ func (m *MockStoryDatabase) RollbackTx(ctx context.Context, tx pgx.Tx) error {
 func (mr *MockStoryDatabaseMockRecorder) RollbackTx(ctx, tx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollbackTx", reflect.TypeOf((*MockStoryDatabase)(nil).RollbackTx), ctx, tx)
+}
+
+// StopStory mocks base method.
+func (m *MockStoryDatabase) StopStory(ctx context.Context, userID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StopStory", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// StopStory indicates an expected call of StopStory.
+func (mr *MockStoryDatabaseMockRecorder) StopStory(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StopStory", reflect.TypeOf((*MockStoryDatabase)(nil).StopStory), ctx, userID)
+}
+
+// UpdateDailyLimit mocks base method.
+func (m *MockStoryDatabase) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateDailyLimit", ctx, tx, dailyLimit)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateDailyLimit indicates an expected call of UpdateDailyLimit.
+func (mr *MockStoryDatabaseMockRecorder) UpdateDailyLimit(ctx, tx, dailyLimit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDailyLimit", reflect.TypeOf((*MockStoryDatabase)(nil).UpdateDailyLimit), ctx, tx, dailyLimit)
+}
+
+// UpdateVariant mocks base method.
+func (m *MockStoryDatabase) UpdateVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateVariant", ctx, tx, variant)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateVariant indicates an expected call of UpdateVariant.
+func (mr *MockStoryDatabaseMockRecorder) UpdateVariant(ctx, tx, variant any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateVariant", reflect.TypeOf((*MockStoryDatabase)(nil).UpdateVariant), ctx, tx, variant)
 }
 
 // MockStoryAI is a mock of StoryAI interface.
@@ -182,7 +283,7 @@ func (m *MockStoryAI) EXPECT() *MockStoryAIMockRecorder {
 }
 
 // GenerateNextStorySegment mocks base method.
-func (m *MockStoryAI) GenerateNextStorySegment(parctx context.Context, storyData string) (*models.StoryNode, error) {
+func (m *MockStoryAI) GenerateNextStorySegment(parctx context.Context, storyData []*models.StoryMessage) (*models.StoryNode, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GenerateNextStorySegment", parctx, storyData)
 	ret0, _ := ret[0].(*models.StoryNode)
@@ -194,21 +295,6 @@ func (m *MockStoryAI) GenerateNextStorySegment(parctx context.Context, storyData
 func (mr *MockStoryAIMockRecorder) GenerateNextStorySegment(parctx, storyData any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateNextStorySegment", reflect.TypeOf((*MockStoryAI)(nil).GenerateNextStorySegment), parctx, storyData)
-}
-
-// GetChatCompletion mocks base method.
-func (m *MockStoryAI) GetChatCompletion(ctx context.Context) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChatCompletion", ctx)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetChatCompletion indicates an expected call of GetChatCompletion.
-func (mr *MockStoryAIMockRecorder) GetChatCompletion(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChatCompletion", reflect.TypeOf((*MockStoryAI)(nil).GetChatCompletion), ctx)
 }
 
 // GetStructuredHeroes mocks base method.
@@ -224,4 +310,86 @@ func (m *MockStoryAI) GetStructuredHeroes(ctx context.Context) (*models.FantasyC
 func (mr *MockStoryAIMockRecorder) GetStructuredHeroes(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStructuredHeroes", reflect.TypeOf((*MockStoryAI)(nil).GetStructuredHeroes), ctx)
+}
+
+// MockStoryCache is a mock of StoryCache interface.
+type MockStoryCache struct {
+	ctrl     *gomock.Controller
+	recorder *MockStoryCacheMockRecorder
+	isgomock struct{}
+}
+
+// MockStoryCacheMockRecorder is the mock recorder for MockStoryCache.
+type MockStoryCacheMockRecorder struct {
+	mock *MockStoryCache
+}
+
+// NewMockStoryCache creates a new mock instance.
+func NewMockStoryCache(ctrl *gomock.Controller) *MockStoryCache {
+	mock := &MockStoryCache{ctrl: ctrl}
+	mock.recorder = &MockStoryCacheMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockStoryCache) EXPECT() *MockStoryCacheMockRecorder {
+	return m.recorder
+}
+
+// AddCreatedUser mocks base method.
+func (m *MockStoryCache) AddCreatedUser(ctx context.Context, userID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddCreatedUser", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddCreatedUser indicates an expected call of AddCreatedUser.
+func (mr *MockStoryCacheMockRecorder) AddCreatedUser(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddCreatedUser", reflect.TypeOf((*MockStoryCache)(nil).AddCreatedUser), ctx, userID)
+}
+
+// AddExceededLimit mocks base method.
+func (m *MockStoryCache) AddExceededLimit(ctx context.Context, userID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddExceededLimit", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddExceededLimit indicates an expected call of AddExceededLimit.
+func (mr *MockStoryCacheMockRecorder) AddExceededLimit(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddExceededLimit", reflect.TypeOf((*MockStoryCache)(nil).AddExceededLimit), ctx, userID)
+}
+
+// CheckCreatedUser mocks base method.
+func (m *MockStoryCache) CheckCreatedUser(ctx context.Context, userID int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckCreatedUser", ctx, userID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckCreatedUser indicates an expected call of CheckCreatedUser.
+func (mr *MockStoryCacheMockRecorder) CheckCreatedUser(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckCreatedUser", reflect.TypeOf((*MockStoryCache)(nil).CheckCreatedUser), ctx, userID)
+}
+
+// CheckExceededLimit mocks base method.
+func (m *MockStoryCache) CheckExceededLimit(ctx context.Context, userID int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckExceededLimit", ctx, userID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckExceededLimit indicates an expected call of CheckExceededLimit.
+func (mr *MockStoryCacheMockRecorder) CheckExceededLimit(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckExceededLimit", reflect.TypeOf((*MockStoryCache)(nil).CheckExceededLimit), ctx, userID)
 }

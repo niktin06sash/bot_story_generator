@@ -38,6 +38,7 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 	return nil
 }
 func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, LogPlace string) (*models.DailyLimit, error) {
+	//Проверяем превышение лимита в кэше
 	isExist, err := s.CStory.CheckExceededLimit(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Warn("CheckExceededLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
