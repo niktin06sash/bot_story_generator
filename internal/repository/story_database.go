@@ -211,15 +211,15 @@ func (s *StoryDatabaseImpl) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dai
 }
 
 // MESSAGES
-func (s *StoryDatabaseImpl) AddStoryMessages(ctx context.Context, userID int64, data string) error {
+func (s *StoryDatabaseImpl) AddStoryMessages(ctx context.Context, userID int64, data string, msgType string) error {
 	query := `
-		INSERT INTO storiesMessages (storyID, data)
-		SELECT id, $2
+		INSERT INTO storiesMessages (storyID, data, type)
+		SELECT id, $2, $3
 		FROM stories
 		WHERE userID = $1 AND isActive = true
 		LIMIT 1;
 	`
-	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, data)
+	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, data, msgType)
 	if err != nil {
 		return fmt.Errorf("failed to add story message: %w", err)
 	}
@@ -228,7 +228,7 @@ func (s *StoryDatabaseImpl) AddStoryMessages(ctx context.Context, userID int64, 
 
 func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, userID int64) (*models.AllStorySegments, error) {
 	query := `
-		SELECT sm.data
+		SELECT sm.data, sm.type
 		FROM storiesMessages sm
 		INNER JOIN stories s ON sm.storyID = s.ID
 		WHERE s.userID = $1 AND s.isActive = TRUE
@@ -241,13 +241,14 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, userID int6
 	}
 	defer rows.Close()
 
-	var segments []string
+	var segments []models.StorySegment
 	for rows.Next() {
 		var data string
-		if err := rows.Scan(&data); err != nil {
+		var msgType string
+		if err := rows.Scan(&data, &msgType); err != nil {
 			return nil, fmt.Errorf("failed to scan story segment: %w", err)
 		}
-		segments = append(segments, data)
+		segments = append(segments, models.StorySegment{Data: data, Type: msgType})
 	}
 
 	if err := rows.Err(); err != nil {

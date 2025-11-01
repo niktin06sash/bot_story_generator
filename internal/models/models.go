@@ -101,7 +101,12 @@ type StoryNode struct {
 
 // Story хранит все сегменты истории для текущей игровой сессии
 type AllStorySegments struct {
-	StorySegments []string
+	StorySegments []StorySegment
+}
+
+type StorySegment struct {
+	Data string
+	Type string
 }
 
 // Генерируем JSON схему во время инициализации
