@@ -3,7 +3,7 @@ package text_messages
 import (
 	"bot_story_generator/internal/models"
 	"fmt"
-	"strings"
+	// "strings"
 )
 
 const Divider = "━━━━━━━━━━━━━━━━━━━━\n"
@@ -26,19 +26,19 @@ type textCommandForHelp struct {
 var TextCommandForHelp = []textCommandForHelp{
 	{
 		Command: "/start",
-		Text:    "Вызвать бота",
+		Text:    "📜 Пробудить хроники — призови бота и начни свой путь.",
 	},
 	{
 		Command: "/newstory",
-		Text:    "Начать новое приключение",
+		Text:    "🗺️ Начать новое приключение — создай историю, полную магии и выборов.",
 	},
 	{
 		Command: "/stopstory",
-		Text:    "Завершить текущую историю",
+		Text:    "⛔ Завершить текущую историю — оборви нить судьбы и начни заново.",
 	},
 	{
 		Command: "/help",
-		Text:    "Посмотреть список команд",
+		Text:    "💬 Список команд — напоминание для странника, ищущего путь.",
 	},
 }
 
@@ -53,20 +53,16 @@ var TextErrorCreateTask = `
 Похоже, магия дала сбой.  
 Попробуй выбрать действие ещё раз чуть позже.`
 
-// TODO надо будет поменять ответ
-var TextErrorUserActiveStory = `Уже есть активная история. Сначала завершите текущую!`
+var TextErrorUserActiveStory = `Вы уже вплетены в нить текущего приключения. Если хотите оборвать её, используйте команду /stopstory.`
 
-// TODO надо будет поменять ответ
-var TextStopActiveStory = `Вы действительно хотите завершить текущую историю?`
+var TextStopActiveStory = `Желаете прервать своё текущее путешествие? Всё, что пережито, останется в памяти хроник.`
 
-// TODO надо будет поменять ответ
-var TextNoActiveStory = `У вас нет активной истории. Воспользуйтесь командой /newstory`
+var TextNoActiveStory = `Пока ваша книга приключений пуста. Воспользуйтесь командой /newstory, чтобы начать новый путь.`
 
-// TODO надо будет поменять ответ
-var TextSuccessStopStory = `Вы успешно завершили историю. Для создания новой воспользуйтесь кнопкой /newstory`
+var TextSuccessStopStory = `История завершена. Перо судьбы готово писать новую главу — воспользуйтесь /newstory.`
 
-// TODO надо будет поменять ответ
-var TextErrorUserDailyLimit = `Превышен лимит дневных ходов. Возвращайтесь завтра!`
+// TODO надо будет поменять ответ на более понятный, побуждающий купить подписку
+var TextErrorUserDailyLimit = `Ваши силы на сегодня иссякли. Отдохните и возвращайтесь завтра, чтобы продолжить свой путь.`
 
 func TextHelp() string {
 	text := "Вот список команд:\n"
@@ -103,37 +99,6 @@ func TextNarrativeWithChoices(narrative string, choices []string) string {
 		}
 	}
 	resp += Divider
-	return resp
-}
-
-func FormatHeroDescription(h models.Hero) string {
-	var resp string
-	resp += Divider
-	resp += "🧝‍♂️Твой герой создан!\n"
-	resp += Divider
-
-	resp += fmt.Sprintf("🪪 Имя: %s\n", h.Name)
-	resp += fmt.Sprintf("🌍 Раса: %s\n", h.Race)
-	resp += fmt.Sprintf("⚔️ Класс: %s\n", h.Class)
-
-	resp += "\n👁️ Внешность:\n"
-	resp += h.Appearance + "\n"
-
-	if len(h.Traits) > 0 {
-		resp += "\n💠 Черты характера:\n"
-		for _, t := range h.Traits {
-			resp += "• " + t + "\n"
-		}
-	}
-
-	resp += "\n✨ Особенность:\n"
-	resp += h.Feature + "\n"
-
-	resp += "\n📜 Биография:\n"
-	resp += h.Biography + "\n"
-
-	resp += Divider
-
 	return resp
 }
 
@@ -180,44 +145,41 @@ func NewChouseHero(heroes *models.FantasyCharacters) []string {
 	return resp
 }
 
-func CreateHeroMessage(hero *models.Hero) string {
-	var msg string
-	msg += Divider
-	msg += "🏰 Характеристика персонажа\n"
-	msg += Divider
+func CreateHeroMessage(h *models.Hero) string {
+	var resp string
+	resp += Divider
+	resp += "🧝‍♂️Твой герой создан!\n"
+	resp += Divider
 
-	if hero.Name != "" {
-		msg += fmt.Sprintf("🏷️ Имя: %s\n", hero.Name)
-	}
-	if hero.Race != "" {
-		msg += fmt.Sprintf("🧬 Раса: %s\n", hero.Race)
-	}
-	if hero.Class != "" {
-		msg += fmt.Sprintf("⚔️ Класс: %s\n", hero.Class)
-	}
-	if hero.Appearance != "" {
-		msg += fmt.Sprintf("🪞 Внешность: %s\n", hero.Appearance)
-	}
-	if len(hero.Traits) > 0 {
-		msg += "💭 Черты характера: "
-		msg += strings.Join(hero.Traits, ", ")
-		msg += "\n"
-	}
-	if hero.Feature != "" {
-		msg += fmt.Sprintf("✨ Особенность: %s\n", hero.Feature)
-	}
-	if hero.Biography != "" {
-		msg += fmt.Sprintf("📜 Биография:\n%s\n", hero.Biography)
+	resp += fmt.Sprintf("🪪 Имя: %s\n", h.Name)
+	resp += fmt.Sprintf("🌍 Раса: %s\n", h.Race)
+	resp += fmt.Sprintf("⚔️ Класс: %s\n", h.Class)
+
+	resp += "\n👁️ Внешность:\n"
+	resp += h.Appearance + "\n"
+
+	if len(h.Traits) > 0 {
+		resp += "\n💠 Черты характера:\n"
+		for _, t := range h.Traits {
+			resp += "• " + t + "\n"
+		}
 	}
 
-	msg += Divider
-	return msg
+	resp += "\n✨ Особенность:\n"
+	resp += h.Feature + "\n"
+
+	resp += "\n📜 Биография:\n"
+	resp += h.Biography + "\n"
+
+	resp += Divider
+
+	return resp
 }
 
 func CreateExtensionMessage(ext *models.Extension) string {
 	var msg string
 	msg += Divider
-	msg += "📖 Продолжение истории\n"
+	msg += "📖 Вы выбрали:\n"
 	msg += Divider
 	msg += ext.Narrative + "\n"
 	msg += Divider
