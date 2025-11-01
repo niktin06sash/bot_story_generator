@@ -18,6 +18,8 @@ var TextGreeting = `Привет! 👋
 👉 Напиши /newstory
 📜 Или /help, если хочешь узнать, как всё устроено.`
 
+var TextUnknownCommand = `Такой команды нет. Воспользуйся /help, если хочешь узнать, как всё устроено.`
+
 type textCommandForHelp struct {
 	Command string
 	Text    string

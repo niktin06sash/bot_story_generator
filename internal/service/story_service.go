@@ -86,6 +86,11 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	//TODO в юзер чойз че то подобное сделай
+	if len(fantasyCharacters.Characters) == 0 {
+		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(errors.New("Empty response from AI")), zap.Any("userID", userID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextErrorCreateTask)
+	}
 	data, err := json.Marshal(fantasyCharacters)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))

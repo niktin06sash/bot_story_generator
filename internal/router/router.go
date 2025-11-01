@@ -102,18 +102,14 @@ func (r *StoryRouterImpl) routerWorker() {
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
 				resp, err := r.service.CreateStory(r.ctx, userID)
+				cancel()
+				//проверка на длину = 0 ответа перенесена в сервис
 				if err != nil {
-					cancel()
 					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				cancel()
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero)
-				if len(resp) == 0 {
-					r.logger.ZapLogger.Error("Empty response from CreateStory", zap.Any("userID", userID))
-					continue
-				}
 				// Выводим всех персонажей (первые len(resp)-1 элементов)
 				for i := 0; i < len(resp)-1; i++ {
 					r.createOutboundMessage(r.ctx, userID, resp[i])
@@ -131,13 +127,12 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
 				resp, err := r.service.UserChoice(r.ctx, userID, arg)
+				cancel()
 				if err != nil {
-					cancel()
 					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				cancel()
 				r.createEditMessage(userID, msgID, "")
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.createOutboundMessage(r.ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
@@ -146,8 +141,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			} else if data == "help" {
 				//пусть логируется новый запрос в роутере
 				r.logger.ZapLogger.Info("User getting help...", zap.Any("userID", userID))
-				text := text_messages.TextHelp()
-				r.createOutboundMessage(r.ctx, userID, text)
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextHelp())
 				r.cleanUserState(userID)
 
 			} else if data == "stopstory" {
@@ -177,6 +171,11 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.createOutboundMessage(r.ctx, userID, resp[0])
+				r.cleanUserState(userID)
+			} else {
+				//пусть логируется новый запрос в роутере
+				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
 				r.cleanUserState(userID)
 			}
 		}

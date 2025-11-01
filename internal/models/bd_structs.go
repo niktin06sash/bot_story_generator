@@ -40,13 +40,15 @@ type StoryMessage struct {
 	StoryID   int       `json:"story_id"`
 	Data      string    `json:"data"`
 	CreatedAt time.Time `json:"created_at"`
+	Type      string    `json:"type"`
 }
 
 // NewStoryMessage создает новое сообщение истории
-func NewStoryMessage(storyID int, data string) *StoryMessage {
+func NewStoryMessage(storyID int, data string, t string) *StoryMessage {
 	return &StoryMessage{
 		StoryID: storyID,
 		Data:    data,
+		Type:    t,
 	}
 }
 
