@@ -232,16 +232,12 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, storyID int
 	}
 	defer rows.Close()
 	msgs := make([]*models.StoryMessage, 0)
-	var segments []models.StorySegment
 	for rows.Next() {
-		var data string
-		var msgType string
 		msg := &models.StoryMessage{}
 		if err := rows.Scan(&msg.Data, &msg.Type); err != nil {
 			return nil, fmt.Errorf("server: database error: %w", err)
 		}
 		msgs = append(msgs, msg)
-		segments = append(segments, models.StorySegment{Data: data, Type: msgType})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("server: database error: %w", err)

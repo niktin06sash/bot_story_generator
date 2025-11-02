@@ -21,16 +21,6 @@ func NewStoryAI(conn *AIConnection) *StoryAIImpl {
 }
 
 func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.FantasyCharacters, error) {
-	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
-	defer cancel()
-
-	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
-		Name:        "fantasy_characters",
-		Description: openai.String("Массив фэнтезийных персонажей"),
-		Schema:      models.FantasyCharactersResponseSchema,
-		Strict:      openai.Bool(true),
-	}
-
 	params := openai.ChatCompletionNewParams{
 		Model: openai.ChatModel(ah.conn.model),
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -39,12 +29,12 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 		},
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
-				JSONSchema: schemaParam,
+				JSONSchema: ah.conn.heroschema,
 			},
 		},
 	}
 
-	resp, err := ah.conn.client.Chat.Completions.New(ctx, params)
+	resp, err := ah.conn.client.Chat.Completions.New(parctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -61,15 +51,6 @@ func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.Fant
 }
 
 func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyData []*models.StoryMessage) (*models.StoryNode, error) {
-	ctx, cancel := context.WithTimeout(parctx, ah.conn.timeout)
-	defer cancel()
-
-	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
-		Name:        "story_segment",
-		Description: openai.String("Повествование + варианты ответов"),
-		Schema:      models.StoryScriptResponseSchema,
-		Strict:      openai.Bool(true),
-	}
 	//Избавляемся от переаллокации append
 	messages := make([]openai.ChatCompletionMessageParamUnion, len(storyData)+1)
 
@@ -93,12 +74,12 @@ func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyDat
 		Messages: messages,
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
 			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
-				JSONSchema: schemaParam,
+				JSONSchema: ah.conn.segschema,
 			},
 		},
 	}
 
-	resp, err := ah.conn.client.Chat.Completions.New(ctx, params)
+	resp, err := ah.conn.client.Chat.Completions.New(parctx, params)
 	if err != nil {
 		return nil, err
 	}

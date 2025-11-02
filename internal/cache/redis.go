@@ -4,19 +4,22 @@ import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"context"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 type CacheObject struct {
-	Connect *redis.Client
-	logger  *logger.Logger
+	Connect          *redis.Client
+	UserCreatedKey   string
+	ExceededLimitKey string
+	logger           *logger.Logger
 }
 
 func NewRedisConnection(cfg *config.Config, logger *logger.Logger) (*CacheObject, error) {
-	redisobject := &CacheObject{}
-	err := redisobject.Open(cfg.Cache.URL)
+	redisobject := &CacheObject{UserCreatedKey: cfg.Cache.UserCreatedKey, ExceededLimitKey: cfg.Cache.ExceededLimitKey}
+	err := redisobject.Open(cfg.Cache.URL, cfg.Cache.ConnectTimeout)
 	if err != nil {
 		logger.ZapLogger.Error("Failed to establish Redis-Client connection", zap.Error(err))
 		return nil, err
@@ -30,11 +33,12 @@ func NewRedisConnection(cfg *config.Config, logger *logger.Logger) (*CacheObject
 	logger.ZapLogger.Info("Successful Redis-connect")
 	return redisobject, nil
 }
-func (r *CacheObject) Open(url string) error {
+func (r *CacheObject) Open(url string, conn_timeout time.Duration) error {
 	opts, err := redis.ParseURL(url)
 	if err != nil {
 		return err
 	}
+	opts.DialTimeout = conn_timeout
 	r.Connect = redis.NewClient(opts)
 	return nil
 }

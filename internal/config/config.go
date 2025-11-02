@@ -18,7 +18,10 @@ type Config struct {
 	Setting    BotSetting
 }
 type CacheConfig struct {
-	URL string
+	ConnectTimeout   time.Duration
+	URL              string
+	UserCreatedKey   string
+	ExceededLimitKey string
 }
 type TelegramConfig struct {
 	BotToken string
@@ -32,8 +35,14 @@ type AIConfig struct {
 	ChatCompletionTimeout time.Duration
 	ApiKey                string
 	Model                 string
+	SchemaHeroes          Schema
+	SchemaSegments        Schema
 }
-
+type Schema struct {
+	Name        string
+	Description string
+	Strict      bool
+}
 type DatabaseConfig struct {
 	ConnectTimeout time.Duration
 	URL            string
@@ -81,6 +90,27 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	aiSchemaParamsNameH := os.Getenv("AI_SCHEMAPARAMS_NAME_HEROES")
+	aiSchemaParamsDescriptionH := os.Getenv("AI_SCHEMAPARAMS_DESCRIPTION_HEROES")
+	aiSchemaParamsStrictH := os.Getenv("AI_SCHEMAPARAMS_STRICT_HEROES")
+	boolaiSchemaParamsStrictH, err := strconv.ParseBool(aiSchemaParamsStrictH)
+	if err != nil {
+		return nil, err
+	}
+	aiSchemaParamsNameSeg := os.Getenv("AI_SCHEMAPARAMS_NAME_STORYSEGMENT")
+	aiSchemaParamsDescriptionSeg := os.Getenv("AI_SCHEMAPARAMS_DESCRIPTION_STORYSEGMENT")
+	aiSchemaParamsStrictSeg := os.Getenv("AI_SCHEMAPARAMS_STRICT_STORYSEGMENT")
+	boolaiSchemaParamsStrictSeg, err := strconv.ParseBool(aiSchemaParamsStrictSeg)
+	if err != nil {
+		return nil, err
+	}
+	//удали как перенесешь в cfg.env
+	//AI_SCHEMAPARAMS_NAME_HEROES = fantasy_characters
+	//AI_SCHEMAPARAMS_DESCRIPTION_HEROES = Массив фэнтезийных персонажей
+	//AI_SCHEMAPARAMS_STRICT_HEROES = true
+	//AI_SCHEMAPARAMS_NAME_STORYSEGMENT = story_segment
+	//AI_SCHEMAPARAMS_DESCRIPTION_STORYSEGMENT = Повествование + варианты ответов
+	//AI_SCHEMAPARAMS_STRICT_STORYSEGMENT = true
 	databaseConnectTimeout := os.Getenv("DATABASE_CONNECT_TIMEOUT")
 	databasecondur, err := time.ParseDuration(databaseConnectTimeout)
 	if err != nil {
@@ -98,6 +128,16 @@ func NewConfig() (*Config, error) {
 		return nil, err
 	}
 	cacheurl := os.Getenv("CACHE_URL")
+	//user_created:%d
+	cachereguser := os.Getenv("CACHE_USER_CREATED_KEY")
+	//limit_exceeded:%d
+	cacheexceededlimit := os.Getenv("CACHE_EXCEEDED_LIMIT_KEY")
+	//30s
+	cacheConnectTimeout := os.Getenv("CACHE_CONNECT_TIMEOUT")
+	cachecondur, err := time.ParseDuration(cacheConnectTimeout)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Telegram: TelegramConfig{
 			BotToken: botToken,
@@ -110,6 +150,8 @@ func NewConfig() (*Config, error) {
 			Model:                 aIModel,
 			ConnectTimeout:        aicondur,
 			ChatCompletionTimeout: aicomdur,
+			SchemaHeroes:          Schema{Name: aiSchemaParamsNameH, Description: aiSchemaParamsDescriptionH, Strict: boolaiSchemaParamsStrictH},
+			SchemaSegments:        Schema{Name: aiSchemaParamsNameSeg, Description: aiSchemaParamsDescriptionSeg, Strict: boolaiSchemaParamsStrictSeg},
 		},
 		Database: DatabaseConfig{
 			ConnectTimeout: databasecondur,
@@ -120,7 +162,10 @@ func NewConfig() (*Config, error) {
 			TokenDayLimit: numTokenLimit,
 		},
 		Cache: CacheConfig{
-			URL: cacheurl,
+			ConnectTimeout:   cachecondur,
+			URL:              cacheurl,
+			UserCreatedKey:   cachereguser,
+			ExceededLimitKey: cacheexceededlimit,
 		},
 	}
 
