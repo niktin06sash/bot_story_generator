@@ -84,3 +84,21 @@ func NewDailyLimit(userID int64, msgCount int, dailyLimit int) *DailyLimit {
 		LimitCount: dailyLimit,
 	}
 }
+
+// Subscription представляет подписку
+type Subscription struct {
+	ID            int64     `db:"id"`
+	UserID        int64     `db:"user_id"`
+	Type          string    `db:"type"`
+	StartDate     time.Time `db:"start_date"`
+	EndDate       time.Time `db:"end_date"`
+	IsAutoRenewal bool      `db:"is_auto_renewal"`
+}
+
+func NewSubscription(userID int64, t string, endtime time.Time) *Subscription {
+	return &Subscription{
+		UserID:  userID,
+		Type:    t,
+		EndDate: endtime,
+	}
+}
