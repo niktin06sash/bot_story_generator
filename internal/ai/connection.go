@@ -65,13 +65,13 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*
 			Name:        cfg.AI.SchemaHeroes.Name,
 			Description: openai.String(cfg.AI.SchemaHeroes.Description),
 			Schema:      models.FantasyCharactersResponseSchema,
-			Strict:      openai.Bool(cfg.AI.SchemaHeroes.Strict),
+			Strict:      openai.Bool(true),
 		},
 		segschema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
 			Name:        cfg.AI.SchemaSegments.Name,
 			Description: openai.String(cfg.AI.SchemaSegments.Description),
 			Schema:      models.StoryScriptResponseSchema,
-			Strict:      openai.Bool(cfg.AI.SchemaSegments.Strict),
+			Strict:      openai.Bool(true),
 		},
 	}, nil
 }

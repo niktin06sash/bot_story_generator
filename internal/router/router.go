@@ -172,12 +172,22 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.cleanUserState(userID)
+
 			} else {
 				//пусть логируется новый запрос в роутере
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
 				r.cleanUserState(userID)
 			}
+
+			// TODO оплатить подписку
+
+			// TODO проверить подписку
+			
+			// TODO отменить подписку
+
+			// TODO посмотреть все истории
+			
 		}
 	}
 }

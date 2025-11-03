@@ -14,15 +14,17 @@ import (
 )
 
 type Bot struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	updatesChan tgbotapi.UpdatesChannel
-	api         *tgbotapi.BotAPI
-	logger      *logger.Logger
-	router      StoryRouter
-	wg          *sync.WaitGroup
-	numworkers  int
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	updatesChan            tgbotapi.UpdatesChannel
+	api                    *tgbotapi.BotAPI
+	logger                 *logger.Logger
+	router                 StoryRouter
+	wg                     *sync.WaitGroup
+	numworkers             int
+	priceBasicSubscription int
 }
+
 type StoryRouter interface {
 	AddComand(ctx context.Context, data string, userID int64, msgID int)
 	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage)
@@ -48,16 +50,18 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 	updates := bot.GetUpdatesChan(u)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Bot{
-		ctx:         ctx,
-		cancel:      cancel,
-		api:         bot,
-		logger:      logger,
-		updatesChan: updates,
-		router:      router,
-		wg:          &sync.WaitGroup{},
-		numworkers:  cfg.NumWorkers,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		api:                    bot,
+		logger:                 logger,
+		updatesChan:            updates,
+		router:                 router,
+		wg:                     &sync.WaitGroup{},
+		numworkers:             cfg.NumWorkers,
+		priceBasicSubscription: cfg.Setting.PriceBasicSubscription,
 	}, nil
 }
+
 func (bot *Bot) StartBot() {
 	outbound, edit, delete := bot.router.GetRouterChans()
 	//maybe increase the number of worker-bots(field = numworkers)
@@ -79,6 +83,7 @@ func (bot *Bot) StartBot() {
 		bot.sendDeleteMessage(delete)
 	}()
 }
+
 func (bot *Bot) readIncommingMessage() {
 	for {
 		select {
@@ -88,6 +93,42 @@ func (bot *Bot) readIncommingMessage() {
 			if !ok {
 				return
 			}
+
+			//! СДЕЛАЛ ИИ
+			//TODO проверить и передалать, сдеоаю потом. Пока планировка
+			// Обработка pre-checkout запроса для платежей (в т.ч. Stars/XTR)
+			if update.PreCheckoutQuery != nil {
+				query := update.PreCheckoutQuery
+				if query.InvoicePayload != "sub_payload_unique" {
+					_, _ = bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
+						"pre_checkout_query_id": query.ID,
+						"ok":                    "false",
+						"error_message":         "Invalid payload",
+					})
+					continue
+				}
+				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
+					"pre_checkout_query_id": query.ID,
+					"ok":                    "true",
+				})
+				if err != nil {
+					bot.logger.ZapLogger.Error("failed to answer pre-checkout", zap.Error(err))
+				}
+				continue
+			}
+			// Обработка успешной оплаты
+			if update.Message != nil && update.Message.SuccessfulPayment != nil {
+				payment := update.Message.SuccessfulPayment
+				userID := update.Message.From.ID
+				bot.logger.ZapLogger.Info("subscription activated", zap.Int64("user_id", userID), zap.String("charge_id", payment.ProviderPaymentChargeID))
+				confirm := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
+				if _, err := bot.api.Send(confirm); err != nil {
+					bot.logger.ZapLogger.Error("failed to send confirmation", zap.Error(err))
+				}
+				continue
+			}
+			//! Конец кода ии
+
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
 				userID := update.CallbackQuery.From.ID
@@ -109,6 +150,7 @@ func (bot *Bot) readIncommingMessage() {
 		}
 	}
 }
+
 func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 	for {
 		select {
@@ -167,6 +209,7 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 		}
 	}
 }
+
 func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 	for {
 		select {
@@ -195,6 +238,7 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 		}
 	}
 }
+
 func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 	for {
 		select {
@@ -273,7 +317,6 @@ func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg
 	return sentmsg, nil
 }
 
-// НОВАЯ ВЕРСИЯ
 func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string) {
 	currentIdx := 1
 	if len(inputText) == 1 {
@@ -355,4 +398,81 @@ func (bot *Bot) Stop() {
 	bot.wg.Wait()
 	bot.router.CloseCommandChan()
 	bot.logger.ZapLogger.Info("Bot stopped")
+}
+
+//! НИЖЕ ПОКА НИЧЕГО НЕ ТРОГАТЬ - потом разнесу по файлам
+
+// ! ПРИМЕР КОДА ИЗ ИИ
+// TODO потом нормально настрою, щас делаю планировку
+func (bot *Bot) sendSubscriptionInvoice(chatID int64) {
+	prices := []tgbotapi.LabeledPrice{
+		{Label: "Monthly Unlimited Stories", Amount: bot.priceBasicSubscription}, // Сумма в Stars
+	}
+
+	// Формируем invoice для оплаты подписки через Stars/XTR Telegram
+	invoice := tgbotapi.NewInvoice(
+		chatID,                              // chatID пользователя, которому отправляем инвойс
+		"Premium Subscription",              // Название инвойса (видно пользователю)
+		"Unlock unlimited story generation", // Описание подписки (видно пользователю)
+		"sub_payload_unique",                // Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
+		"",                                  // providerToken — токен платежного провайдера. Для Stars (XTR) оставляем пустым
+		"XTR",                               // название валюты. Для Telegram Stars нужно использовать "XTR"
+		"",                                  // startParameter — строка для deep-link, обычно пустая если не требуется стартовая ссылка
+		prices,                              // массив цен (LabeledPrice), здесь одна строка с суммой подписки
+	)
+	// Примечание: Если используется сторонний провайдер (providerToken), его указываем вместо "", если только Stars — оставлять пустым (поддерживается с tgbotapi v5.13+)
+	// Рекуррентные параметры на уровне InvoiceConfig не поддерживаются. Повторные списания на стороне Stars/Telegram.
+	msg, err := bot.api.Send(invoice)
+	if err != nil {
+		log.Println("Error sending invoice:", err)
+	} else {
+		log.Println("Invoice sent:", msg)
+	}
+}
+
+// ! ПРИМЕР КОДА ИЗ ИИ
+// TODO потом нормально настрою, щас делаю планировку
+func (bot *Bot) handleUpdate(update tgbotapi.Update) {
+	if update.PreCheckoutQuery != nil {
+		query := update.PreCheckoutQuery
+		// Проверьте payload и т.д.
+		if query.InvoicePayload != "sub_payload_unique" {
+			bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
+				"pre_checkout_query_id": query.ID,
+				"ok":                    "false",
+				"error_message":         "Invalid payload",
+			})
+			return
+		}
+		_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
+			"pre_checkout_query_id": query.ID,
+			"ok":                    "true",
+		})
+		if err != nil {
+			log.Println("Error answering pre-checkout:", err)
+		}
+	} else if update.Message != nil && update.Message.SuccessfulPayment != nil {
+		payment := update.Message.SuccessfulPayment
+		userID := update.Message.From.ID
+		// Сохраните в БД: userID, subscription_id (из payload или query), until_date = current + period
+		// Предоставьте неограниченный доступ, например, обновите статус пользователя
+		log.Println("Subscription activated for user:", userID, "Charge ID:", payment.ProviderPaymentChargeID)
+		// Отправьте подтверждение
+		msg := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
+		bot.api.Send(msg)
+	}
+}
+
+// ! ПРИМЕР КОДА ИЗ ИИ
+// TODO потом нормально настрою, щас делаю планировку
+func (bot *Bot) cancelSubscription(userID int64, chargeID string) {
+	params := tgbotapi.Params{
+		"user_id":   strconv.FormatInt(userID, 10),
+		"charge_id": chargeID,
+		"restore":   "false", // Или true для разрешения повторной активации
+	}
+	_, err := bot.api.MakeRequest("botCancelStarsSubscription", params)
+	if err != nil {
+		log.Println("Cancel error:", err)
+	}
 }
