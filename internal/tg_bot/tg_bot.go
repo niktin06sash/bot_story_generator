@@ -120,6 +120,8 @@ func (bot *Bot) readIncommingMessage() {
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
 				payment := update.Message.SuccessfulPayment
 				userID := update.Message.From.ID
+				chargeID := payment.ProviderPaymentChargeID
+				untilDate := time.Now().AddDate(0, 0, 30) // +30 дней
 				bot.logger.ZapLogger.Info("subscription activated", zap.Int64("user_id", userID), zap.String("charge_id", payment.ProviderPaymentChargeID))
 				confirm := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
 				if _, err := bot.api.Send(confirm); err != nil {

@@ -198,15 +198,16 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	//TODO генерим ответ ии - вынести в другую функцию потом
+	//* А зачем выносить в другую функцию? Вроде немного места занимает?
+
 	// Получаем все сегменты истории
-	//Пояснишь, чем именно структура AllStorySegments отличается от StoryMessage и почему именно ее использовать надо в ИИ?(Я сделал с StoryMessage)
 	allStory, err := s.DBStory.GetAllStorySegments(ctx, storyID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
-	// Добавляем выбор пользователя в формат истории, в бд добавим потом, во время транзакции
+	// Добавляем выбор пользователя в формат истории, в бд добавляем потом, во время транзакции
 	storySegment := &models.StoryMessage{Data: msg, Type: "user"}
 	allStory = append(allStory, storySegment)
 
@@ -227,6 +228,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	newUserMsg := models.NewStoryMessage(storyID, msg, "user")
 	newAssistantMsg := models.NewStoryMessage(storyID, narrative, "assistant")
+
 	// Сохраняем сообщения
 	err = s.DBStory.AddStoryMessages(ctx, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
 	if err != nil {
@@ -237,6 +239,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Обновляем вариант
 	choicesData, err := json.Marshal(choice)
 	if err != nil {
@@ -247,6 +250,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
 	if err = s.DBStory.UpdateVariant(ctx, tx, addingVariant); err != nil {
 		s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))

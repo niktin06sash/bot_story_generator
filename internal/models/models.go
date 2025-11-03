@@ -99,25 +99,9 @@ type StoryNode struct {
 	Choices   []string `json:"choices" jsonschema_description:"Пять вариантов действия героя, реагирующих на повествование" jsonschema:"minItems=5,maxItems=5"`
 }
 
-// Story хранит все сегменты истории для текущей игровой сессии
-type AllStorySegments struct {
-	StorySegments []StorySegment
-}
-
-type StorySegment struct {
-	Data string
-	Type string
-}
-
-// Генерируем JSON схему во время инициализации
 var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
 
 // Extension представляет продолжение сюжета
 type Extension struct {
 	Narrative string
-}
-
-// StoryChoise представляет массив историй на выбор
-type StoryChoise struct {
-	Story []Extension
 }
