@@ -139,6 +139,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	//3 лог
 	s.Logger.ZapLogger.Info("Story created successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return text_messages.NewChouseHero(fantasyCharacters), nil
 }
@@ -182,6 +183,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		}
 		userVariant := fantasyCharacters.Characters[number_choice-1]
 		msg = text_messages.CreateHeroMessage(&userVariant)
+		//3 лог
 		s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("place", place))
 	case "actions":
 		var choices []string
@@ -191,6 +193,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		}
 		userVariant := models.Extension{Narrative: choices[number_choice-1]}
 		msg = text_messages.CreateExtensionMessage(&userVariant)
+		//3 лог
 		s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("place", place))
 	default:
 		s.Logger.ZapLogger.Error("Unknown variant type", zap.String("type", variant.Type), zap.Any("userID", userID), zap.Any("place", place))
@@ -276,6 +279,8 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 
 	// Формируем ответ
 	resp := text_messages.TextNarrativeWithChoices(narrative, choice)
+	//4 лог
+	s.Logger.ZapLogger.Info("User's choice made successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{msg, resp}, nil
 }
 
@@ -285,9 +290,11 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 	if err != nil {
 		s.Logger.ZapLogger.Warn("CheckCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 	} else if isExist {
-		s.Logger.ZapLogger.Warn("CheckCreatedUser", zap.Error(errors.New("cache: user is already registered")), zap.Any("userID", userID), zap.Any("place", place))
+		//3 лог
+		s.Logger.ZapLogger.Info("CheckCreatedUser User is already created. Returning response", zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextGreeting)
 	} else if !isExist {
+		//3 лог
 		s.Logger.ZapLogger.Info("CheckCreatedUser Created user not in cache. Trying creating in database...", zap.Any("userID", userID), zap.Any("place", place))
 	}
 	user := models.NewUser(userID)
@@ -304,6 +311,7 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 		s.Logger.ZapLogger.Error("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	//4 лог
 	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextGreeting}, nil
 }
@@ -323,7 +331,8 @@ func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]strin
 		s.Logger.ZapLogger.Warn("GetActiveStories", zap.Error(fmt.Errorf("client: user already has not an active history")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextNoActiveStory)
 	}
-	s.Logger.ZapLogger.Info("Check active story successfully", zap.Any("userID", userID), zap.Any("place", place))
+	//3 лог
+	s.Logger.ZapLogger.Info("Active story checked successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextStopActiveStory}, nil
 }
 
@@ -337,6 +346,7 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	s.Logger.ZapLogger.Info("Stop active story successfully", zap.Any("userID", userID), zap.Any("place", place))
+	//3 лог
+	s.Logger.ZapLogger.Info("Active story stopped successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextSuccessStopStory}, nil
 }

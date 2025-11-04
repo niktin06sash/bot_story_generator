@@ -9,7 +9,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"go.uber.org/zap"
 )
 
 type AIConnection struct {
@@ -22,13 +21,11 @@ type AIConnection struct {
 }
 
 func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*AIConnection, error) {
-	logger.ZapLogger.Info("Initializing AIConnection...")
-
 	httpClient := &http.Client{Timeout: cfg.AI.ConnectTimeout}
 
 	apiKey := cfg.AI.ApiKey
 	if apiKey == "" {
-		logger.ZapLogger.Info("Using empty OpenAI API key for local LM Studio")
+		logger.ZapLogger.Debug("Using empty OpenAI API key for local LM Studio")
 	}
 
 	client := openai.NewClient(
@@ -42,25 +39,21 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*
 			return next(req)
 		}),
 	)
-	fileData, err := os.ReadFile("promts/main_game_rules.txt")
+	fileData, err := os.ReadFile(cfg.AI.PathMainGameRules)
 	if err != nil {
-		logger.ZapLogger.Error("failed to read promt main_game_rules.txt", zap.Error(err))
 		return nil, err
 	}
 	mgpromt := string(fileData)
-	fileData, err = os.ReadFile("promts/create_hero.txt")
+	fileData, err = os.ReadFile(cfg.AI.PathCreateHero)
 	if err != nil {
-		logger.ZapLogger.Error("failed to read promt main_game_rules.txt", zap.Error(err))
 		return nil, err
 	}
 	crhero := string(fileData)
-	logger.ZapLogger.Info("AIConnection successfully initialized")
 	return &AIConnection{
 		client:                &client,
 		model:                 model,
 		main_game_rules_promt: mgpromt,
 		create_hero_promt:     crhero,
-		//если это статически неизменяемые данные, то их также лучше один раз инициаилизировать
 		heroschema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
 			Name:        cfg.AI.SchemaHeroes.Name,
 			Description: openai.String(cfg.AI.SchemaHeroes.Description),

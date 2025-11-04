@@ -5,6 +5,8 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"context"
+	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,16 +36,15 @@ type StoryRouter interface {
 func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot, error) {
 	bot, err := tgbotapi.NewBotAPI(cfg.Telegram.BotToken)
 	if err != nil {
-		logger.ZapLogger.Error("Failed to create Telegram bot", zap.Error(err))
 		return nil, err
 	}
 
 	bot.Debug = cfg.Telegram.BotDebug
 	if bot.Debug {
-		logger.ZapLogger.Info("telegram bot debug mode is enabled")
+		logger.ZapLogger.Debug("Telegram bot debug mode is enabled")
 	}
 
-	logger.ZapLogger.Info("Authorized on account " + bot.Self.UserName)
+	logger.ZapLogger.Debug("Authorized on account " + bot.Self.UserName)
 	u := tgbotapi.NewUpdate(cfg.Telegram.Offset)
 	u.Timeout = cfg.Telegram.Timeout
 
@@ -57,7 +58,7 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 		updatesChan:            updates,
 		router:                 router,
 		wg:                     &sync.WaitGroup{},
-		numworkers:             cfg.NumWorkers,
+		numworkers:             cfg.Setting.NumWorkers,
 		priceBasicSubscription: cfg.Setting.PriceBasicSubscription,
 	}, nil
 }
@@ -120,8 +121,8 @@ func (bot *Bot) readIncommingMessage() {
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
 				payment := update.Message.SuccessfulPayment
 				userID := update.Message.From.ID
-				chargeID := payment.ProviderPaymentChargeID
-				untilDate := time.Now().AddDate(0, 0, 30) // +30 дней
+				//chargeID := payment.ProviderPaymentChargeID
+				//untilDate := time.Now().AddDate(0, 0, 30) // +30 дней
 				bot.logger.ZapLogger.Info("subscription activated", zap.Int64("user_id", userID), zap.String("charge_id", payment.ProviderPaymentChargeID))
 				confirm := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
 				if _, err := bot.api.Send(confirm); err != nil {
@@ -135,6 +136,7 @@ func (bot *Bot) readIncommingMessage() {
 				data := update.CallbackQuery.Data
 				userID := update.CallbackQuery.From.ID
 				msgID := update.CallbackQuery.Message.MessageID
+				//1 лог
 				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID))
 				bot.router.AddComand(bot.ctx, data, userID, msgID)
 				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
@@ -144,6 +146,7 @@ func (bot *Bot) readIncommingMessage() {
 				userID := update.Message.From.ID
 				msgID := msg.MessageID
 				if msg.IsCommand() {
+					//1 лог
 					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
 					command := update.Message.Command()
 					bot.router.AddComand(bot.ctx, command, userID, msgID)
@@ -196,17 +199,18 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 			_, err := bot.api.Request(edit)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
-					"failed to edit message",
+					"Failed to edit message",
 					zap.Error(err),
-					zap.Int64("user_id", editMsg.UserID),
-					zap.Int("msg_id", editMsg.MsgID),
+					zap.Any("userID", editMsg.UserID),
+					zap.Any("msgID", editMsg.MsgID),
 				)
 				continue
 			}
+			//последний лог
 			bot.logger.ZapLogger.Info(
-				"message edited successfully",
-				zap.Int64("user_id", editMsg.UserID),
-				zap.Int("msg_id", editMsg.MsgID),
+				"Message edited successfully",
+				zap.Any("userID", editMsg.UserID),
+				zap.Any("msgID", editMsg.MsgID),
 			)
 		}
 	}
@@ -225,18 +229,20 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 			_, err := bot.api.Request(del)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
-					"failed to delete message",
+					"Failed to delete message",
 					zap.Error(err),
-					zap.Int64("user_id", deleteMsg.UserID),
-					zap.Int("message_id", deleteMsg.MsgID),
+					zap.Any("userID", deleteMsg.UserID),
+					zap.Any("msgID", deleteMsg.MsgID),
 				)
-			} else {
-				bot.logger.ZapLogger.Info(
-					"message deleted successfully",
-					zap.Int64("user_id", deleteMsg.UserID),
-					zap.Int("message_id", deleteMsg.MsgID),
-				)
+				continue
 			}
+			//последний лог
+			bot.logger.ZapLogger.Info(
+				"Message deleted successfully",
+				zap.Any("userID", deleteMsg.UserID),
+				zap.Any("msgID", deleteMsg.MsgID),
+			)
+
 		}
 	}
 }
@@ -303,17 +309,16 @@ func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg
 	sentmsg, err := bot.api.Send(msg)
 	if err != nil {
 		bot.logger.ZapLogger.Error(
-			"failed to send message",
+			"Failed to send message",
 			zap.Error(err),
-			zap.Int64("user_id", userID),
-			zap.String("message", msg.Text),
+			zap.Any("userID", userID),
 		)
 		return sentmsg, err
 	}
 	bot.logger.ZapLogger.Info(
-		"message sent successfully",
-		zap.Int64("user_id", userID),
-		zap.String("message", msg.Text),
+		"Message sent successfully",
+		zap.Any("userID", userID),
+		zap.Any("msgID", sentmsg.MessageID),
 	)
 
 	return sentmsg, nil
@@ -324,58 +329,43 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 	if len(inputText) == 1 {
 		currentIdx = 0
 	}
-	bot.logger.ZapLogger.Info(
-		"Starting waitingMessageWithAnimation",
-		zap.Int64("user_id", userID),
-		zap.Int("message_id", sentMsg.MessageID),
-	)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			bot.logger.ZapLogger.Info(
-				"context cancelled, deleting loading message",
-				zap.Int64("user_id", userID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
 			del := tgbotapi.NewDeleteMessage(userID, sentMsg.MessageID)
 			_, err := bot.api.Request(del)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
-					"failed to delete loading message",
+					"Failed to delete loading message",
 					zap.Error(err),
-					zap.Int64("user_id", userID),
-					zap.Int("message_id", sentMsg.MessageID),
+					zap.Any("userID", userID),
+					zap.Any("msgID", sentMsg.MessageID),
 				)
 			} else {
 				bot.logger.ZapLogger.Info(
-					"loading message deleted successfully",
-					zap.Int64("user_id", userID),
-					zap.Int("message_id", sentMsg.MessageID),
+					"Loading message deleted successfully",
+					zap.Any("userID", userID),
+					zap.Any("msgID", sentMsg.MessageID),
 				)
 			}
 			return
 		case <-bot.ctx.Done():
-			bot.logger.ZapLogger.Info(
-				"context cancelled, deleting loading message",
-				zap.Int64("user_id", userID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
 			del := tgbotapi.NewDeleteMessage(userID, sentMsg.MessageID)
 			_, err := bot.api.Request(del)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
-					"failed to delete loading message",
+					"Failed to delete loading message",
 					zap.Error(err),
-					zap.Int64("user_id", userID),
-					zap.Int("message_id", sentMsg.MessageID),
+					zap.Any("userID", userID),
+					zap.Any("msgID", sentMsg.MessageID),
 				)
 			} else {
 				bot.logger.ZapLogger.Info(
-					"loading message deleted successfully",
-					zap.Int64("user_id", userID),
-					zap.Int("message_id", sentMsg.MessageID),
+					"Loading message deleted successfully",
+					zap.Any("userID", userID),
+					zap.Any("msgID", sentMsg.MessageID),
 				)
 			}
 			return
@@ -384,10 +374,10 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 			_, err := bot.api.Send(editMsg)
 			if err != nil {
 				bot.logger.ZapLogger.Error(
-					"failed to update waiting message",
+					"Failed to edit loading message",
 					zap.Error(err),
-					zap.Int64("user_id", userID),
-					zap.Int("message_id", sentMsg.MessageID),
+					zap.Any("userID", userID),
+					zap.Any("msgID", sentMsg.MessageID),
 				)
 			}
 			currentIdx = (currentIdx + 1) % len(inputText)
@@ -399,7 +389,7 @@ func (bot *Bot) Stop() {
 	bot.cancel()
 	bot.wg.Wait()
 	bot.router.CloseCommandChan()
-	bot.logger.ZapLogger.Info("Bot stopped")
+	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
 }
 
 //! НИЖЕ ПОКА НИЧЕГО НЕ ТРОГАТЬ - потом разнесу по файлам

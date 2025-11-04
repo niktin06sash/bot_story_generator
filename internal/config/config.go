@@ -10,14 +10,22 @@ import (
 )
 
 type Config struct {
-	Telegram   TelegramConfig
-	AI         AIConfig
-	Database   DatabaseConfig
-	Cache      CacheConfig
-	NumWorkers int
-	Setting    BotSetting
+	Logger   LoggerConfig
+	Telegram TelegramConfig
+	AI       AIConfig
+	Database DatabaseConfig
+	Cache    CacheConfig
+	Setting  ServerSetting
 }
-
+type LoggerConfig struct {
+	LogPaths FilePaths
+}
+type FilePaths struct {
+	Info  string
+	Debug string
+	Warn  string
+	Error string
+}
 type CacheConfig struct {
 	ConnectTimeout   time.Duration
 	URL              string
@@ -39,6 +47,8 @@ type AIConfig struct {
 	Model                 string
 	SchemaHeroes          Schema
 	SchemaSegments        Schema
+	PathMainGameRules     string
+	PathCreateHero        string
 }
 
 type Schema struct {
@@ -51,19 +61,21 @@ type DatabaseConfig struct {
 	URL            string
 }
 
-type BotSetting struct {
-	TokenDayLimit int
+type ServerSetting struct {
+	NumWorkers             int
+	TokenDayLimit          int
 	PriceBasicSubscription int
 }
 
 func NewConfig() (*Config, error) {
-	_ = godotenv.Load("cfg.env")
-
+	err := godotenv.Load("cfg.env")
+	if err != nil {
+		return nil, err
+	}
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
 		return nil, errors.New("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
-
 	botDebug := os.Getenv("TELEGRAM_BOT_DEBUG")
 	telegramBotDebug := true
 	if botDebug == "False" || botDebug == "false" || botDebug == "0" {
@@ -75,13 +87,11 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	botTimeOut := os.Getenv("TELEGRAM_BOT_TIMEOUT")
 	to, err := strconv.Atoi(botTimeOut)
 	if err != nil {
 		return nil, err
 	}
-
 	aIApiKey := os.Getenv("AI_API_KEY")
 
 	aIModel := os.Getenv("AI_MODEL")
@@ -100,7 +110,8 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	aiPathMainGameRules := os.Getenv("AI_PATH_PROMT_MAIN_GAME_RULES")
+	aiPathCreateHero := os.Getenv("AI_PATH_PROMT_CREATE_HERO")
 	aiSchemaParamsNameH := os.Getenv("AI_SCHEMAPARAMS_NAME_HEROES")
 	aiSchemaParamsDescriptionH := os.Getenv("AI_SCHEMAPARAMS_DESCRIPTION_HEROES")
 
@@ -120,13 +131,12 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	//че не написал какие значения в cfg.env
 	tokenLimit := os.Getenv("TOKEN_DAY_LIMIT")
 	numTokenLimit, err := strconv.Atoi(tokenLimit)
 	if err != nil {
 		return nil, err
 	}
-
 	priceBasicS := os.Getenv("PRICE_BASIC_SUBSCRIPTION")
 	numPriceBasicS, err := strconv.Atoi(priceBasicS)
 	if err != nil {
@@ -135,20 +145,35 @@ func NewConfig() (*Config, error) {
 
 	cacheurl := os.Getenv("CACHE_URL")
 
-	//user_created:%d
 	cachereguser := os.Getenv("CACHE_USER_CREATED_KEY")
-	
-	//limit_exceeded:%d
+
 	cacheexceededlimit := os.Getenv("CACHE_EXCEEDED_LIMIT_KEY")
 
-	//30s
 	cacheConnectTimeout := os.Getenv("CACHE_CONNECT_TIMEOUT")
 	cachecondur, err := time.ParseDuration(cacheConnectTimeout)
 	if err != nil {
 		return nil, err
 	}
-
+	/*cfg.env
+	LOGGER_INFO_FILE_PATH = internal/logger/logs/info.log
+	LOGGER_WARN_FILE_PATH = internal/logger/logs/warn.log
+	LOGGER_ERROR_FILE_PATH = internal/logger/logs/error.log
+	LOGGER_FATAL_FILE_PATH = internal/logger/logs/fatal.log
+	LOGGER_DEBUG_FILE_PATH = internal/logger/logs/debug.log
+	*/
+	loggerInfoPath := os.Getenv("LOGGER_INFO_FILE_PATH")
+	loggerWarnPath := os.Getenv("LOGGER_WARN_FILE_PATH")
+	loggerErrorPath := os.Getenv("LOGGER_ERROR_FILE_PATH")
+	loggerDebugPath := os.Getenv("LOGGER_DEBUG_FILE_PATH")
 	cfg := &Config{
+		Logger: LoggerConfig{
+			LogPaths: FilePaths{
+				Info:  loggerInfoPath,
+				Warn:  loggerWarnPath,
+				Error: loggerErrorPath,
+				Debug: loggerDebugPath,
+			},
+		},
 		Telegram: TelegramConfig{
 			BotToken: botToken,
 			BotDebug: telegramBotDebug,
@@ -162,15 +187,17 @@ func NewConfig() (*Config, error) {
 			ChatCompletionTimeout: aicomdur,
 			SchemaHeroes:          Schema{Name: aiSchemaParamsNameH, Description: aiSchemaParamsDescriptionH},
 			SchemaSegments:        Schema{Name: aiSchemaParamsNameSeg, Description: aiSchemaParamsDescriptionSeg},
+			PathMainGameRules:     aiPathMainGameRules,
+			PathCreateHero:        aiPathCreateHero,
 		},
 		Database: DatabaseConfig{
 			ConnectTimeout: databasecondur,
 			URL:            databaseConnectUrl,
 		},
-		NumWorkers: num,
-		Setting: BotSetting{
-			TokenDayLimit: numTokenLimit,
+		Setting: ServerSetting{
+			TokenDayLimit:          numTokenLimit,
 			PriceBasicSubscription: numPriceBasicS,
+			NumWorkers:             num,
 		},
 		Cache: CacheConfig{
 			ConnectTimeout:   cachecondur,

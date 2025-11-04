@@ -49,7 +49,7 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 		mux:           &sync.Mutex{},
 		logger:        logger,
 		wg:            &sync.WaitGroup{},
-		numworkers:    cfg.NumWorkers,
+		numworkers:    cfg.Setting.NumWorkers,
 	}
 
 	return routerImpl
@@ -84,7 +84,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			msgID := msg.MsgID
 
 			if data == "start" {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("Creating user...", zap.Any("userID", userID))
 				resp, err := r.service.CreateUser(r.ctx, userID)
 				if err != nil {
@@ -95,7 +95,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if data == "newstory" {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("Creating new story...", zap.Any("userID", userID))
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
@@ -103,7 +103,6 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
 				resp, err := r.service.CreateStory(r.ctx, userID)
 				cancel()
-				//проверка на длину = 0 ответа перенесена в сервис
 				if err != nil {
 					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
@@ -119,7 +118,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if strings.HasPrefix(data, "userChoice_") {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("User making a choice...", zap.Any("userID", userID))
 				localctx, cancel := context.WithCancel(r.ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
@@ -139,13 +138,13 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if data == "help" {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("User getting help...", zap.Any("userID", userID))
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextHelp())
 				r.cleanUserState(userID)
 
 			} else if data == "stopstory" {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("User stopping story...", zap.Any("userID", userID))
 				resp, err := r.service.StopStory(r.ctx, userID)
 				if err != nil {
@@ -156,8 +155,8 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else if strings.HasPrefix(data, "stopStoryChoice_") {
-				//пусть логируется новый запрос в роутере
-				r.logger.ZapLogger.Info("User making a stopStorychoice...", zap.Any("userID", userID))
+				//2 лог
+				r.logger.ZapLogger.Info("User making a stop story choice...", zap.Any("userID", userID))
 				arg := strings.TrimPrefix(data, "stopStoryChoice_")
 				resp, err := r.service.StopStoryChoice(r.ctx, userID, arg)
 				r.createDeleteMessage(userID, msgID)
@@ -174,7 +173,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 
 			} else {
-				//пусть логируется новый запрос в роутере
+				//2 лог
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
 				r.cleanUserState(userID)
@@ -183,11 +182,11 @@ func (r *StoryRouterImpl) routerWorker() {
 			// TODO оплатить подписку
 
 			// TODO проверить подписку
-			
+
 			// TODO отменить подписку
 
 			// TODO посмотреть все истории
-			
+
 		}
 	}
 }
@@ -215,5 +214,5 @@ func (r *StoryRouterImpl) Stop() {
 	close(r.chan_outbound)
 	close(r.chan_edit)
 	close(r.chan_delete)
-	r.logger.ZapLogger.Info("Router stopped")
+	r.logger.ZapLogger.Debug("Successful stopped Router-Workers")
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 type CacheObject struct {
@@ -17,21 +16,17 @@ type CacheObject struct {
 	logger           *logger.Logger
 }
 
-func NewRedisConnection(cfg *config.Config, logger *logger.Logger) (*CacheObject, error) {
-	redisobject := &CacheObject{UserCreatedKey: cfg.Cache.UserCreatedKey, ExceededLimitKey: cfg.Cache.ExceededLimitKey}
-	err := redisobject.Open(cfg.Cache.URL, cfg.Cache.ConnectTimeout)
+func NewCacheConnection(cfg *config.Config, logger *logger.Logger) (*CacheObject, error) {
+	cacheobject := &CacheObject{UserCreatedKey: cfg.Cache.UserCreatedKey, ExceededLimitKey: cfg.Cache.ExceededLimitKey, logger: logger}
+	err := cacheobject.Open(cfg.Cache.URL, cfg.Cache.ConnectTimeout)
 	if err != nil {
-		logger.ZapLogger.Error("Failed to establish Redis-Client connection", zap.Error(err))
 		return nil, err
 	}
-	err = redisobject.Ping()
+	err = cacheobject.Ping()
 	if err != nil {
-		logger.ZapLogger.Error("Failed to ping Redis-Client connection", zap.Error(err))
-		redisobject.Close()
 		return nil, err
 	}
-	logger.ZapLogger.Info("Successful Redis-connect")
-	return redisobject, nil
+	return cacheobject, nil
 }
 func (r *CacheObject) Open(url string, conn_timeout time.Duration) error {
 	opts, err := redis.ParseURL(url)
@@ -50,5 +45,5 @@ func (r *CacheObject) Ping() error {
 
 func (r *CacheObject) Close() {
 	r.Connect.Close()
-	r.logger.ZapLogger.Info("Successful close Redis-connect")
+	r.logger.ZapLogger.Debug("Successful close Cache-connect")
 }

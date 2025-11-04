@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"go.uber.org/zap"
 )
 
 func NewDBObject(cfg *config.Config, logger *logger.Logger) (*DBObject, error) {
@@ -15,12 +14,10 @@ func NewDBObject(cfg *config.Config, logger *logger.Logger) (*DBObject, error) {
 	defer cancel()
 	poolConfig, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
-		logger.ZapLogger.Error("Failed to parse Postgres-connection string", zap.Error(err))
 		return nil, err
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
-		logger.ZapLogger.Error("Failed to create Postgres-connection pool", zap.Error(err))
 		return nil, err
 	}
 	err = pool.Ping(ctx)
@@ -28,7 +25,6 @@ func NewDBObject(cfg *config.Config, logger *logger.Logger) (*DBObject, error) {
 		pool.Close()
 		return nil, err
 	}
-	logger.ZapLogger.Info("Successful Postgres-connect")
 	return &DBObject{Pool: pool, logger: logger}, nil
 }
 
@@ -39,5 +35,5 @@ type DBObject struct {
 
 func (db *DBObject) Close() {
 	db.Pool.Close()
-	db.logger.ZapLogger.Info("Successful close Postgres-connect")
+	db.logger.ZapLogger.Debug("Successful close Database-connect")
 }
