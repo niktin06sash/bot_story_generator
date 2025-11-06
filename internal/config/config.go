@@ -64,6 +64,7 @@ type DatabaseConfig struct {
 type ServerSetting struct {
 	NumWorkers             int
 	TokenDayLimit          int
+	PremiumTokenDayLimit   int
 	PriceBasicSubscription int
 }
 
@@ -137,6 +138,14 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 10000
+	premiumLimit := os.Getenv("PREMIUM_TOKEN_DAY_LIMIT")
+	numPremiumLimit, err := strconv.Atoi(premiumLimit)
+	if err != nil {
+		return nil, err
+	}
+
 	priceBasicS := os.Getenv("PRICE_BASIC_SUBSCRIPTION")
 	numPriceBasicS, err := strconv.Atoi(priceBasicS)
 	if err != nil {
@@ -165,6 +174,7 @@ func NewConfig() (*Config, error) {
 	loggerWarnPath := os.Getenv("LOGGER_WARN_FILE_PATH")
 	loggerErrorPath := os.Getenv("LOGGER_ERROR_FILE_PATH")
 	loggerDebugPath := os.Getenv("LOGGER_DEBUG_FILE_PATH")
+
 	cfg := &Config{
 		Logger: LoggerConfig{
 			LogPaths: FilePaths{
@@ -196,6 +206,7 @@ func NewConfig() (*Config, error) {
 		},
 		Setting: ServerSetting{
 			TokenDayLimit:          numTokenLimit,
+			PremiumTokenDayLimit:   numPremiumLimit,
 			PriceBasicSubscription: numPriceBasicS,
 			NumWorkers:             num,
 		},

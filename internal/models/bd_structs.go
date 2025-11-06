@@ -93,12 +93,16 @@ type Subscription struct {
 	StartDate     time.Time `db:"start_date"`
 	EndDate       time.Time `db:"end_date"`
 	IsAutoRenewal bool      `db:"is_auto_renewal"`
+	ChargeId      string    `db:"charge_id"`
 }
 
-func NewSubscription(userID int64, t string, endtime time.Time) *Subscription {
+func NewSubscription(userID int64, t string, endtime time.Time, chargeId string) *Subscription {
 	return &Subscription{
-		UserID:  userID,
-		Type:    t,
-		EndDate: endtime,
+		UserID:        userID,
+		Type:          t,
+		StartDate:     time.Now(),
+		EndDate:       endtime,
+		IsAutoRenewal: true,
+		ChargeId:      chargeId,
 	}
 }

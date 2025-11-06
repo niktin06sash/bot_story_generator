@@ -6,14 +6,15 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, userID int64, msgID int) IncommingMessage {
-	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID}
+func NewIncommingMessage(data string, userID int64, msgID int, arguments interface{}) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID, Arguments: arguments}
 }
 
 type IncommingMessage struct {
-	Data   string
-	UserID int64
-	MsgID  int
+	Data      string
+	UserID    int64
+	MsgID     int
+	Arguments interface{}
 }
 
 func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
@@ -104,4 +105,57 @@ var StoryScriptResponseSchema = GenerateSchema[StoryNode]()
 // Extension представляет продолжение сюжета
 type Extension struct {
 	Narrative string
+}
+
+// BotCommandType представляет тип команды бота
+type BotCommandType string
+
+// TODO мб потом передеать
+const (
+	BotCommandSendSubscriptionInvoice BotCommandType = "send_subscription_invoice"
+	BotCommandCancelSubscription      BotCommandType = "cancel_subscription"
+)
+
+// BotCommand представляет команду для выполнения ботом
+type BotCommand struct {
+	Type     BotCommandType
+	UserID   int64
+	ChatID   int64  // Для sendSubscriptionInvoice
+	ChargeID string // Для cancelSubscription
+}
+
+// NewBotCommandWithChatID создает команду с указанным chatID
+func NewBotCommand(cmdType BotCommandType, userID int64, chatID int64) BotCommand {
+	return BotCommand{
+		Type:   cmdType,
+		UserID: userID,
+		ChatID: chatID,
+	}
+}
+
+// NewBotCommandCancelSubscription создает команду отмены подписки
+func NewBotCommandCancelSubscription(userID int64, chargeID string) BotCommand {
+	return BotCommand{
+		Type:     BotCommandCancelSubscription,
+		UserID:   userID,
+		ChargeID: chargeID,
+	}
+}
+
+// PaymentData представляет данные успешного платежа
+type PaymentData struct {
+	ChargeID       string
+	Currency       string
+	TotalAmount    int
+	InvoicePayload string
+}
+
+// NewPaymentData создает новые данные платежа
+func NewPaymentData(chargeID, currency, invoicePayload string, totalAmount int) *PaymentData {
+	return &PaymentData{
+		ChargeID:       chargeID,
+		Currency:       currency,
+		TotalAmount:    totalAmount,
+		InvoicePayload: invoicePayload,
+	}
 }

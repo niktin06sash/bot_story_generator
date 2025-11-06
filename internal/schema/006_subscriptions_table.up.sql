@@ -5,6 +5,7 @@ CREATE TABLE subscriptions (
     startDate TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     endDate TIMESTAMP WITH TIME ZONE NOT NULL,
     isAutoRenewal BOOLEAN DEFAULT TRUE,
+    chargeId TEXT,
     CONSTRAINT fk_user
         FOREIGN KEY (userID)
         REFERENCES users(ID)
@@ -12,3 +13,4 @@ CREATE TABLE subscriptions (
 );
 CREATE INDEX idx_subscriptions_user_id ON subscriptions (userID);
 CREATE INDEX idx_subscriptions_end_date ON subscriptions (endDate);
+CREATE INDEX idx_subscriptions_charge_id ON subscriptions (chargeId) WHERE chargeId IS NOT NULL;

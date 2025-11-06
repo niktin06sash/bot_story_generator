@@ -5,7 +5,6 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"context"
-	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,8 +27,8 @@ type Bot struct {
 }
 
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64, msgID int)
-	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage)
+	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments interface{})
+	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.BotCommand)
 	CloseCommandChan()
 }
 
@@ -64,9 +63,10 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 }
 
 func (bot *Bot) StartBot() {
-	outbound, edit, delete := bot.router.GetRouterChans()
+	outbound, edit, delete, cmdChan := bot.router.GetRouterChans()
+
 	//maybe increase the number of worker-bots(field = numworkers)
-	bot.wg.Add(4)
+	bot.wg.Add(5)
 	go func() {
 		defer bot.wg.Done()
 		bot.readIncommingMessage()
@@ -83,6 +83,10 @@ func (bot *Bot) StartBot() {
 		defer bot.wg.Done()
 		bot.sendDeleteMessage(delete)
 	}()
+	go func() {
+		defer bot.wg.Done()
+		bot.sendBotCommand(cmdChan)
+	}()
 }
 
 func (bot *Bot) readIncommingMessage() {
@@ -95,12 +99,22 @@ func (bot *Bot) readIncommingMessage() {
 				return
 			}
 
-			//! СДЕЛАЛ ИИ
-			//TODO проверить и передалать, сдеоаю потом. Пока планировка
-			// Обработка pre-checkout запроса для платежей (в т.ч. Stars/XTR)
+			// Обработка pre-checkout запроса для платежей (Stars/XTR)
+			// PreCheckoutQuery обрабатывается в боте, так как это системный запрос Telegram API
 			if update.PreCheckoutQuery != nil {
 				query := update.PreCheckoutQuery
+				bot.logger.ZapLogger.Info("Received pre-checkout query",
+					zap.String("query_id", query.ID),
+					zap.String("payload", query.InvoicePayload),
+					zap.Int64("user_id", query.From.ID),
+				)
+
+				// Проверяем payload подписки
 				if query.InvoicePayload != "sub_payload_unique" {
+					bot.logger.ZapLogger.Warn("Invalid invoice payload",
+						zap.String("payload", query.InvoicePayload),
+						zap.String("query_id", query.ID),
+					)
 					_, _ = bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
 						"pre_checkout_query_id": query.ID,
 						"ok":                    "false",
@@ -108,29 +122,52 @@ func (bot *Bot) readIncommingMessage() {
 					})
 					continue
 				}
+
+				// Подтверждаем pre-checkout
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
 					"pre_checkout_query_id": query.ID,
 					"ok":                    "true",
 				})
 				if err != nil {
-					bot.logger.ZapLogger.Error("failed to answer pre-checkout", zap.Error(err))
+					bot.logger.ZapLogger.Error("Failed to answer pre-checkout query",
+						zap.Error(err),
+						zap.String("query_id", query.ID),
+					)
+				} else {
+					bot.logger.ZapLogger.Info("Pre-checkout query answered successfully",
+						zap.String("query_id", query.ID),
+					)
 				}
 				continue
 			}
+
 			// Обработка успешной оплаты
+			// Передаем данные в роутер для сохранения в БД и отправки сообщения
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
-				payment := update.Message.SuccessfulPayment
-				userID := update.Message.From.ID
-				//chargeID := payment.ProviderPaymentChargeID
-				//untilDate := time.Now().AddDate(0, 0, 30) // +30 дней
-				bot.logger.ZapLogger.Info("subscription activated", zap.Int64("user_id", userID), zap.String("charge_id", payment.ProviderPaymentChargeID))
-				confirm := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
-				if _, err := bot.api.Send(confirm); err != nil {
-					bot.logger.ZapLogger.Error("failed to send confirmation", zap.Error(err))
-				}
+				payment := update.Message.SuccessfulPayment                 // объект успешного платежа из сообщения
+				userID := update.Message.From.ID                            // ID пользователя, совершившего платеж
+				msgID := update.Message.MessageID                           // ID Telegram-сообщения, связанного с платежом
+				chargeID := payment.ProviderPaymentChargeID                 // Уникальный идентификатор чека (charge_id) от платежного провайдера
+
+				bot.logger.ZapLogger.Info("Received successful payment",
+					zap.Int64("user_id", userID),
+					zap.String("charge_id", chargeID),
+					zap.String("currency", payment.Currency),
+					zap.Int("total_amount", payment.TotalAmount),
+				)
+
+				// Передаем данные платежа в роутер через arguments
+				paymentData := models.NewPaymentData(
+					chargeID,               // уникальный идентификатор транзакции (charge_id)
+					payment.Currency,       // валюта платежа, например "XTR"
+					payment.InvoicePayload, // payload инвойса (строка, используемая для проверки типа покупки)
+					payment.TotalAmount,    // общая сумма платежа в минимальных единицах валюты
+				)
+
+				// Отправляем команду в роутер для обработки платежа
+				bot.router.AddComand(bot.ctx, "successful_payment", userID, msgID, paymentData)
 				continue
 			}
-			//! Конец кода ии
 
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
@@ -138,7 +175,7 @@ func (bot *Bot) readIncommingMessage() {
 				msgID := update.CallbackQuery.Message.MessageID
 				//1 лог
 				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID))
-				bot.router.AddComand(bot.ctx, data, userID, msgID)
+				bot.router.AddComand(bot.ctx, data, userID, msgID, nil)
 				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 			} else if update.Message != nil {
 				text := update.Message.Text
@@ -149,7 +186,7 @@ func (bot *Bot) readIncommingMessage() {
 					//1 лог
 					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
 					command := update.Message.Command()
-					bot.router.AddComand(bot.ctx, command, userID, msgID)
+					bot.router.AddComand(bot.ctx, command, userID, msgID, nil)
 				}
 			}
 		}
@@ -243,6 +280,46 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 				zap.Any("msgID", deleteMsg.MsgID),
 			)
 
+		}
+	}
+}
+
+func (bot *Bot) sendBotCommand(ch chan models.BotCommand) {
+	for {
+		select {
+		case <-bot.ctx.Done():
+			return
+		case cmd, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch cmd.Type {
+			case models.BotCommandSendSubscriptionInvoice:
+				bot.logger.ZapLogger.Info(
+					"Executing send subscription invoice command",
+					zap.Any("userID", cmd.UserID),
+					zap.Any("chatID", cmd.ChatID),
+				)
+				bot.sendSubscriptionInvoice(cmd.ChatID)
+			case models.BotCommandCancelSubscription:
+				bot.logger.ZapLogger.Info(
+					"Executing cancel subscription command",
+					zap.Any("userID", cmd.UserID),
+					zap.String("chargeID", cmd.ChargeID),
+				)
+				bot.cancelSubscription(cmd.UserID, cmd.ChargeID)
+				// Можно отправить сообщение пользователю, что подписка отменена
+				_, err := bot.sendMessage(cmd.UserID, "Ваша подписка отменена.", nil)
+				if err != nil {
+					bot.logger.ZapLogger.Error("Failed to send subscription cancellation message", zap.Error(err), zap.Any("userID", cmd.UserID))
+				}
+			default:
+				bot.logger.ZapLogger.Warn(
+					"Unknown bot command type",
+					zap.String("type", string(cmd.Type)),
+					zap.Any("userID", cmd.UserID),
+				)
+			}
 		}
 	}
 }
@@ -392,10 +469,7 @@ func (bot *Bot) Stop() {
 	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
 }
 
-//! НИЖЕ ПОКА НИЧЕГО НЕ ТРОГАТЬ - потом разнесу по файлам
-
-// ! ПРИМЕР КОДА ИЗ ИИ
-// TODO потом нормально настрою, щас делаю планировку
+// * Функция отправки инвойса с подпиской
 func (bot *Bot) sendSubscriptionInvoice(chatID int64) {
 	prices := []tgbotapi.LabeledPrice{
 		{Label: "Monthly Unlimited Stories", Amount: bot.priceBasicSubscription}, // Сумма в Stars
@@ -416,47 +490,13 @@ func (bot *Bot) sendSubscriptionInvoice(chatID int64) {
 	// Рекуррентные параметры на уровне InvoiceConfig не поддерживаются. Повторные списания на стороне Stars/Telegram.
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
-		log.Println("Error sending invoice:", err)
+		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("chatID", chatID))
 	} else {
-		log.Println("Invoice sent:", msg)
+		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("message", msg), zap.Any("chatID", chatID))
 	}
 }
 
-// ! ПРИМЕР КОДА ИЗ ИИ
-// TODO потом нормально настрою, щас делаю планировку
-func (bot *Bot) handleUpdate(update tgbotapi.Update) {
-	if update.PreCheckoutQuery != nil {
-		query := update.PreCheckoutQuery
-		// Проверьте payload и т.д.
-		if query.InvoicePayload != "sub_payload_unique" {
-			bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
-				"pre_checkout_query_id": query.ID,
-				"ok":                    "false",
-				"error_message":         "Invalid payload",
-			})
-			return
-		}
-		_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
-			"pre_checkout_query_id": query.ID,
-			"ok":                    "true",
-		})
-		if err != nil {
-			log.Println("Error answering pre-checkout:", err)
-		}
-	} else if update.Message != nil && update.Message.SuccessfulPayment != nil {
-		payment := update.Message.SuccessfulPayment
-		userID := update.Message.From.ID
-		// Сохраните в БД: userID, subscription_id (из payload или query), until_date = current + period
-		// Предоставьте неограниченный доступ, например, обновите статус пользователя
-		log.Println("Subscription activated for user:", userID, "Charge ID:", payment.ProviderPaymentChargeID)
-		// Отправьте подтверждение
-		msg := tgbotapi.NewMessage(userID, "Subscription active! Enjoy unlimited stories.")
-		bot.api.Send(msg)
-	}
-}
-
-// ! ПРИМЕР КОДА ИЗ ИИ
-// TODO потом нормально настрою, щас делаю планировку
+// * Функция отмены подписки
 func (bot *Bot) cancelSubscription(userID int64, chargeID string) {
 	params := tgbotapi.Params{
 		"user_id":   strconv.FormatInt(userID, 10),
@@ -465,6 +505,6 @@ func (bot *Bot) cancelSubscription(userID int64, chargeID string) {
 	}
 	_, err := bot.api.MakeRequest("botCancelStarsSubscription", params)
 	if err != nil {
-		log.Println("Cancel error:", err)
+		bot.logger.ZapLogger.Error("Cancel error:", zap.Error(err))
 	}
 }

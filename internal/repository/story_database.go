@@ -244,3 +244,52 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, storyID int
 	}
 	return msgs, nil
 }
+
+// AddSubscription добавляет новую подписку для пользователя
+func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
+	query := `
+		INSERT INTO subscriptions (userID, type, startDate, endDate, isAutoRenewal, chargeId)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query,
+		subscription.UserID,
+		subscription.Type,
+		subscription.StartDate,
+		subscription.EndDate,
+		subscription.IsAutoRenewal,
+		subscription.ChargeId,
+	)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}
+
+// GetUserSubscription возвращает подписку пользователя по userID
+func (s *StoryDatabaseImpl) GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+	query := `
+		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId
+		FROM subscriptions
+		WHERE userID = $1
+		ORDER BY endDate DESC
+		LIMIT 1
+	`
+	row := s.databaseclient.Pool.QueryRow(ctx, query, userID)
+
+	subscription := &models.Subscription{}
+	err := row.Scan(
+		&subscription.UserID,
+		&subscription.Type,
+		&subscription.StartDate,
+		&subscription.EndDate,
+		&subscription.IsAutoRenewal,
+		&subscription.ChargeId,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // Нет подписки
+		}
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	return subscription, nil
+}

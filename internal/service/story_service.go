@@ -39,6 +39,9 @@ type StoryDatabase interface {
 
 	AddStoryMessages(ctx context.Context, tx pgx.Tx, msgs []*models.StoryMessage) error
 	GetAllStorySegments(ctx context.Context, storyID int) ([]*models.StoryMessage, error)
+
+	AddSubscription(ctx context.Context, subscription *models.Subscription) error
+	GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 }
 type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
@@ -349,4 +352,30 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	//3 лог
 	s.Logger.ZapLogger.Info("Active story stopped successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return []string{text_messages.TextSuccessStopStory}, nil
+}
+
+func (s *StoryServiceImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
+	place := "AddSubscription"
+	err := s.DBStory.AddSubscription(ctx, subscription)
+	if err != nil {
+		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", subscription.UserID), zap.Any("place", place))
+		return fmt.Errorf("server: failed to add subscription: %w", err)
+	}
+	s.Logger.ZapLogger.Info("Subscription added successfully", zap.Any("userID", subscription.UserID), zap.String("charge_id", subscription.ChargeId), zap.Any("place", place))
+	return nil
+}
+
+func (s *StoryServiceImpl) GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+	place := "GetUserSubscription"
+	subscription, err := s.DBStory.GetUserSubscription(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetUserSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return nil, fmt.Errorf("server: failed to get subscription: %w", err)
+	}
+	if subscription == nil {
+		s.Logger.ZapLogger.Info("No subscription found for user", zap.Any("userID", userID), zap.Any("place", place))
+		return nil, nil
+	}
+	s.Logger.ZapLogger.Info("Subscription retrieved successfully", zap.Any("userID", userID), zap.String("charge_id", subscription.ChargeId), zap.Any("place", place))
+	return subscription, nil
 }
