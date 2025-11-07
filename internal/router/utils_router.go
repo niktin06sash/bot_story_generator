@@ -26,6 +26,13 @@ func (r *StoryRouterImpl) createDeleteMessage(userID int64, msgID int) {
 	case r.chan_edit <- models.NewDeleteMessage(userID, msgID):
 	}
 }
+func (r *StoryRouterImpl) createBotCommand(userID int64, t string, chargeID string) {
+	select {
+	case <-r.ctx.Done():
+		return
+	case r.chan_bot_cmd <- models.NewBotCommand(t, userID, chargeID):
+	}
+}
 func (r *StoryRouterImpl) cleanUserState(userID int64) {
 	r.mux.Lock()
 	delete(r.userState, userID)

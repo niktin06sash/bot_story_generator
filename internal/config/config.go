@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -66,6 +67,7 @@ type ServerSetting struct {
 	TokenDayLimit          int
 	PremiumTokenDayLimit   int
 	PriceBasicSubscription int
+	Admins                 map[int64]struct{}
 }
 
 func NewConfig() (*Config, error) {
@@ -132,14 +134,12 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	//че не написал какие значения в cfg.env
 	tokenLimit := os.Getenv("TOKEN_DAY_LIMIT")
 	numTokenLimit, err := strconv.Atoi(tokenLimit)
 	if err != nil {
 		return nil, err
 	}
 
-	// 10000
 	premiumLimit := os.Getenv("PREMIUM_TOKEN_DAY_LIMIT")
 	numPremiumLimit, err := strconv.Atoi(premiumLimit)
 	if err != nil {
@@ -163,17 +163,22 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	/*cfg.env
-	LOGGER_INFO_FILE_PATH = internal/logger/logs/info.log
-	LOGGER_WARN_FILE_PATH = internal/logger/logs/warn.log
-	LOGGER_ERROR_FILE_PATH = internal/logger/logs/error.log
-	LOGGER_DEBUG_FILE_PATH = internal/logger/logs/debug.log
-	*/
+
 	loggerInfoPath := os.Getenv("LOGGER_INFO_FILE_PATH")
 	loggerWarnPath := os.Getenv("LOGGER_WARN_FILE_PATH")
 	loggerErrorPath := os.Getenv("LOGGER_ERROR_FILE_PATH")
 	loggerDebugPath := os.Getenv("LOGGER_DEBUG_FILE_PATH")
-
+	//ADMIN_IDS = 8241831678,1370660713
+	adminIDs := os.Getenv("ADMIN_IDS")
+	ids := strings.Split(adminIDs, ",")
+	intAdminIDs := make(map[int64]struct{})
+	for _, idStr := range ids {
+		id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		intAdminIDs[id] = struct{}{}
+	}
 	cfg := &Config{
 		Logger: LoggerConfig{
 			LogPaths: FilePaths{
@@ -208,6 +213,7 @@ func NewConfig() (*Config, error) {
 			PremiumTokenDayLimit:   numPremiumLimit,
 			PriceBasicSubscription: numPriceBasicS,
 			NumWorkers:             num,
+			Admins:                 intAdminIDs,
 		},
 		Cache: CacheConfig{
 			ConnectTimeout:   cachecondur,

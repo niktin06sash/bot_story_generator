@@ -8,7 +8,6 @@ import (
 	"context"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 )
@@ -19,7 +18,7 @@ type StoryService interface {
 	CreateUser(ctx context.Context, userID int64) ([]string, error)
 	StopStory(ctx context.Context, userID int64) ([]string, error)
 	StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error)
-	AddSubscription(ctx context.Context, subscription *models.Subscription) error
+	AddSubscription(ctx context.Context, userID int64, chargeID string) error
 	GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 }
 
@@ -34,7 +33,8 @@ type StoryRouterImpl struct {
 	chan_bot_cmd  chan models.BotCommand
 	logger        *logger.Logger
 	userState     map[int64]struct{}
-	mux           *sync.Mutex
+	admins        map[int64]struct{}
+	mux           *sync.RWMutex
 	wg            *sync.WaitGroup
 	numworkers    int
 }
@@ -51,7 +51,8 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 		chan_delete:   make(chan models.DeleteMessage, 1000),
 		chan_bot_cmd:  make(chan models.BotCommand, 1000),
 		userState:     make(map[int64]struct{}),
-		mux:           &sync.Mutex{},
+		admins:        cfg.Setting.Admins,
+		mux:           &sync.RWMutex{},
 		logger:        logger,
 		wg:            &sync.WaitGroup{},
 		numworkers:    cfg.Setting.NumWorkers,
@@ -87,7 +88,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			data := msg.Data
 			userID := msg.UserID
 			msgID := msg.MsgID
-			// args := msg.Arguments
+			args := msg.Arguments
 
 			if data == "start" {
 				//2 лог
@@ -178,100 +179,65 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.cleanUserState(userID)
 
-			} else if data == "canselSubscription" {
-				// Эта команда разрешена только для определённых chatID
-				allowedChatIDs := map[int64]struct{}{
-					1370660713: {}, // заменить на реальные chatID
-					0000:       {}, // свой id добавь
+			} else if data == "cancelSubscription" {
+				r.mux.RLock()
+				_, ok := r.admins[userID]
+				r.mux.RUnlock()
+				if !ok {
+					r.logger.ZapLogger.Info("User entered a cancelSubscription command...", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
+					r.cleanUserState(userID)
+					continue
 				}
-				if _, ok := allowedChatIDs[userID]; ok {
-					// TODO вынести потом в сервис это
-					// * То, что щас, делала ии
-					// Получаем подписку пользователя из БД
-					subscription, err := r.service.GetUserSubscription(r.ctx, userID)
-					if err != nil {
-						r.logger.ZapLogger.Error("Failed to get user subscription", zap.Error(err), zap.Any("userID", userID))
-						r.createOutboundMessage(r.ctx, userID, "Ошибка при получении данных подписки. Обратитесь в поддержку.")
-						r.cleanUserState(userID)
-						continue
-					}
-
-					if subscription == nil || subscription.ChargeId == "" {
-						r.logger.ZapLogger.Warn("No active subscription found for user", zap.Any("userID", userID))
-						r.createOutboundMessage(r.ctx, userID, "У вас нет активной подписки для отмены.")
-						r.cleanUserState(userID)
-						continue
-					}
-
-					cmd := models.BotCommand{
-						Type:     models.BotCommandCancelSubscription,
-						UserID:   userID,
-						ChargeID: subscription.ChargeId,
-					}
-					r.SendBotCommand(cmd)
-					r.createOutboundMessage(r.ctx, userID, "Запрос на отмену подписки отправлен.")
-
-					//TODO отменить подписку в бд
+				// TODO вынести потом в сервис это
+				// * То, что щас, делала ии
+				// Получаем подписку пользователя из БД
+				//здесь надо попробовать за один запрос в бд отменить подписку(главное не удалять chargeID из базы данных) + получить данные chargeID о ней
+				subscription, err := r.service.GetUserSubscription(r.ctx, userID)
+				if err != nil {
+					r.logger.ZapLogger.Error("Failed to get user subscription", zap.Error(err), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "Ошибка при получении данных подписки. Обратитесь в поддержку.")
+					r.cleanUserState(userID)
+					continue
 				}
-
+				r.createBotCommand(userID, models.BotCommandCancelSubscription, subscription.ChargeId)
+				//TODO отменить подписку в бд
 				r.cleanUserState(userID)
 
 			} else if data == "successful_payment" {
 				// Обработка успешной оплаты подписки
 				//2 лог
 				r.logger.ZapLogger.Info("Processing successful payment...", zap.Any("userID", userID))
-
+				//чел не сможет вызвать successful_payments с нужными данными?
 				// Получаем данные платежа из arguments
-				paymentData, ok := msg.Arguments.(*models.PaymentData)
+				paymentData, ok := args.(*models.PaymentData)
+				//проверка на отсутствие аргументов при вызове
 				if !ok || paymentData == nil {
 					r.logger.ZapLogger.Error("Invalid payment data format", zap.Any("userID", userID))
 					r.createOutboundMessage(r.ctx, userID, "Ошибка обработки платежа. Обратитесь в поддержку.")
 					r.cleanUserState(userID)
 					continue
 				}
-
-				if paymentData.ChargeID == "" {
-					r.logger.ZapLogger.Error("Missing or invalid charge_id", zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "Ошибка обработки платежа. Обратитесь в поддержку.")
-					r.cleanUserState(userID)
-					continue
-				}
-
 				// TODO вынести потом в сервис это
 				// * То, что щас, делала ии
 				// TODO время на которае дается подписка убрать в из хардкора
 				// Сохраняем подписку в БД через сервис
-				subscription := models.NewSubscription(paymentData.ChargeID, userID, "basic", time.Now().AddDate(0, 0, 30))
-				err := r.service.AddSubscription(r.ctx, subscription)
+				err := r.service.AddSubscription(r.ctx, userID, paymentData.ChargeID)
 				if err != nil {
 					r.logger.ZapLogger.Error("Failed to add subscription", zap.Error(err), zap.Any("userID", userID))
 					r.createOutboundMessage(r.ctx, userID, "Ошибка активации подписки. Обратитесь в поддержку.")
 					r.cleanUserState(userID)
 					continue
 				}
-
-				r.logger.ZapLogger.Info("Payment processed successfully",
-					zap.Any("userID", userID),
-					zap.String("charge_id", paymentData.ChargeID),
-					zap.String("currency", paymentData.Currency),
-					zap.Int("total_amount", paymentData.TotalAmount),
-				)
 				r.createOutboundMessage(r.ctx, userID, "Подписка активирована! Наслаждайтесь неограниченными историями.")
 				r.cleanUserState(userID)
 
 			} else if data == "buy_subscription" {
 				// * То, что щас, делала ии
 				// Обработка команды покупки подписки
-				r.logger.ZapLogger.Info("User requested to buy subscription", zap.Any("userID", userID))
-
-				// Здесь отправим команду боту на создание и отправку инвойса пользователю
-				cmd := models.BotCommand{
-					Type:   models.BotCommandSendSubscriptionInvoice,
-					UserID: userID,
-					ChatID: userID, // для Telegram ChatID == UserID для личных чатов
-				}
-				r.SendBotCommand(cmd)
-
+				//проверить что у пользователя нет активной подписки
+				r.logger.ZapLogger.Info("User requested to buy subscription...", zap.Any("userID", userID))
+				r.createBotCommand(userID, models.BotCommandSendSubscriptionInvoice, "")
 				r.createOutboundMessage(r.ctx, userID, "Счёт на оплату отправлен. Следуйте инструкциям Telegram для завершения покупки подписки.")
 				r.cleanUserState(userID)
 			} else {
@@ -301,19 +267,6 @@ func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int
 
 func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.BotCommand) {
 	return r.chan_outbound, r.chan_edit, r.chan_delete, r.chan_bot_cmd
-}
-
-func (r *StoryRouterImpl) GetBotCommandChan() chan models.BotCommand {
-	return r.chan_bot_cmd
-}
-
-// SendBotCommand отправляет команду боту для выполнения
-func (r *StoryRouterImpl) SendBotCommand(cmd models.BotCommand) {
-	select {
-	case <-r.ctx.Done():
-		return
-	case r.chan_bot_cmd <- cmd:
-	}
 }
 
 func (r *StoryRouterImpl) CloseCommandChan() {

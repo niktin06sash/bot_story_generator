@@ -4,6 +4,7 @@ import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
+	"bot_story_generator/internal/text_messages"
 	"context"
 	"strconv"
 	"strings"
@@ -98,7 +99,6 @@ func (bot *Bot) readIncommingMessage() {
 			if !ok {
 				return
 			}
-
 			// Обработка pre-checkout запроса для платежей (Stars/XTR)
 			// PreCheckoutQuery обрабатывается в боте, так как это системный запрос Telegram API
 			if update.PreCheckoutQuery != nil {
@@ -144,10 +144,10 @@ func (bot *Bot) readIncommingMessage() {
 			// Обработка успешной оплаты
 			// Передаем данные в роутер для сохранения в БД и отправки сообщения
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
-				payment := update.Message.SuccessfulPayment                 // объект успешного платежа из сообщения
-				userID := update.Message.From.ID                            // ID пользователя, совершившего платеж
-				msgID := update.Message.MessageID                           // ID Telegram-сообщения, связанного с платежом
-				chargeID := payment.ProviderPaymentChargeID                 // Уникальный идентификатор чека (charge_id) от платежного провайдера
+				payment := update.Message.SuccessfulPayment // объект успешного платежа из сообщения
+				userID := update.Message.From.ID            // ID пользователя, совершившего платеж
+				msgID := update.Message.MessageID           // ID Telegram-сообщения, связанного с платежом
+				chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
 
 				bot.logger.ZapLogger.Info("Received successful payment",
 					zap.Int64("user_id", userID),
@@ -186,7 +186,15 @@ func (bot *Bot) readIncommingMessage() {
 					//1 лог
 					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
 					command := update.Message.Command()
+					if command == "successful_payment" {
+						//костыль что извне нельзя вызывать successful_payment как команду
+						bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
+						continue
+					}
 					bot.router.AddComand(bot.ctx, command, userID, msgID, nil)
+				} else {
+					//обычные сообщения также игнорируются
+					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
 				}
 			}
 		}
@@ -298,9 +306,8 @@ func (bot *Bot) sendBotCommand(ch chan models.BotCommand) {
 				bot.logger.ZapLogger.Info(
 					"Executing send subscription invoice command",
 					zap.Any("userID", cmd.UserID),
-					zap.Any("chatID", cmd.ChatID),
 				)
-				bot.sendSubscriptionInvoice(cmd.ChatID)
+				bot.sendSubscriptionInvoice(cmd.UserID)
 			case models.BotCommandCancelSubscription:
 				bot.logger.ZapLogger.Info(
 					"Executing cancel subscription command",
@@ -311,7 +318,7 @@ func (bot *Bot) sendBotCommand(ch chan models.BotCommand) {
 				// Можно отправить сообщение пользователю, что подписка отменена
 				_, err := bot.sendMessage(cmd.UserID, "Ваша подписка отменена.", nil)
 				if err != nil {
-					bot.logger.ZapLogger.Error("Failed to send subscription cancellation message", zap.Error(err), zap.Any("userID", cmd.UserID))
+					continue
 				}
 			default:
 				bot.logger.ZapLogger.Warn(
@@ -462,22 +469,17 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 	}
 }
 
-func (bot *Bot) Stop() {
-	bot.cancel()
-	bot.wg.Wait()
-	bot.router.CloseCommandChan()
-	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
-}
-
+// где здесь время на сколько дней покупается?
 // * Функция отправки инвойса с подпиской
-func (bot *Bot) sendSubscriptionInvoice(chatID int64) {
+func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 	prices := []tgbotapi.LabeledPrice{
 		{Label: "Monthly Unlimited Stories", Amount: bot.priceBasicSubscription}, // Сумма в Stars
 	}
-
+	//обязательно надо добавить payload для подписки из уникального ключа, который будем знать только мы
+	//TODO сделать отдельный слой с генерацией payload подписки
 	// Формируем invoice для оплаты подписки через Stars/XTR Telegram
 	invoice := tgbotapi.NewInvoice(
-		chatID,                              // chatID пользователя, которому отправляем инвойс
+		userID,                              // userID пользователя, которому отправляем инвойс
 		"Premium Subscription",              // Название инвойса (видно пользователю)
 		"Unlock unlimited story generation", // Описание подписки (видно пользователю)
 		"sub_payload_unique",                // Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
@@ -490,9 +492,9 @@ func (bot *Bot) sendSubscriptionInvoice(chatID int64) {
 	// Рекуррентные параметры на уровне InvoiceConfig не поддерживаются. Повторные списания на стороне Stars/Telegram.
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
-		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("chatID", chatID))
+		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", userID))
 	} else {
-		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("message", msg), zap.Any("chatID", chatID))
+		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("message", msg), zap.Any("userID", userID))
 	}
 }
 
@@ -507,4 +509,11 @@ func (bot *Bot) cancelSubscription(userID int64, chargeID string) {
 	if err != nil {
 		bot.logger.ZapLogger.Error("Cancel error:", zap.Error(err))
 	}
+}
+
+func (bot *Bot) Stop() {
+	bot.cancel()
+	bot.wg.Wait()
+	bot.router.CloseCommandChan()
+	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
 }

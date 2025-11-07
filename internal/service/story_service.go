@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"context"
 
@@ -354,14 +355,16 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	return []string{text_messages.TextSuccessStopStory}, nil
 }
 
-func (s *StoryServiceImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
+func (s *StoryServiceImpl) AddSubscription(ctx context.Context, userID int64, chargeID string) error {
 	place := "AddSubscription"
-	err := s.DBStory.AddSubscription(ctx, subscription)
+	//что-то придумать с датой подписки
+	sub := models.NewSubscription(chargeID, userID, "base", time.Now().AddDate(0, 0, 30))
+	err := s.DBStory.AddSubscription(ctx, sub)
 	if err != nil {
-		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", subscription.UserID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return fmt.Errorf("server: failed to add subscription: %w", err)
 	}
-	s.Logger.ZapLogger.Info("Subscription added successfully", zap.Any("userID", subscription.UserID), zap.String("charge_id", subscription.ChargeId), zap.Any("place", place))
+	s.Logger.ZapLogger.Info("Subscription added successfully", zap.Any("userID", userID), zap.String("chargeID", chargeID), zap.Any("place", place))
 	return nil
 }
 
@@ -376,6 +379,6 @@ func (s *StoryServiceImpl) GetUserSubscription(ctx context.Context, userID int64
 		s.Logger.ZapLogger.Info("No subscription found for user", zap.Any("userID", userID), zap.Any("place", place))
 		return nil, nil
 	}
-	s.Logger.ZapLogger.Info("Subscription retrieved successfully", zap.Any("userID", userID), zap.String("charge_id", subscription.ChargeId), zap.Any("place", place))
+	s.Logger.ZapLogger.Info("Subscription retrieved successfully", zap.Any("userID", userID), zap.String("chargeID", subscription.ChargeId), zap.Any("place", place))
 	return subscription, nil
 }

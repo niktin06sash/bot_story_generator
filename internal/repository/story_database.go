@@ -27,13 +27,13 @@ func NewStoryDatabase(cfg *config.Config, db *database.DBObject) *StoryDatabaseI
 // USERS
 func (s *StoryDatabaseImpl) AddUser(ctx context.Context, user *models.User) error {
 	query := `
-        INSERT INTO users (ID, isSub)
-        VALUES ($1, $2)
+        INSERT INTO users (ID)
+        VALUES ($1)
         ON CONFLICT(ID) DO NOTHING 
         RETURNING ID
     `
 	var insertedID int64
-	err := s.databaseclient.Pool.QueryRow(ctx, query, user.ID, user.IsSub).Scan(&insertedID)
+	err := s.databaseclient.Pool.QueryRow(ctx, query, user.ID).Scan(&insertedID)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
