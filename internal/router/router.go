@@ -210,7 +210,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					}
 					r.SendBotCommand(cmd)
 					r.createOutboundMessage(r.ctx, userID, "Запрос на отмену подписки отправлен.")
-					
+
 					//TODO отменить подписку в бд
 				}
 
@@ -241,7 +241,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				// * То, что щас, делала ии
 				// TODO время на которае дается подписка убрать в из хардкора
 				// Сохраняем подписку в БД через сервис
-				subscription := models.NewSubscription(userID, "basic", time.Now().AddDate(0, 0, 30), paymentData.ChargeID)
+				subscription := models.NewSubscription(paymentData.ChargeID, userID, "basic", time.Now().AddDate(0, 0, 30))
 				err := r.service.AddSubscription(r.ctx, subscription)
 				if err != nil {
 					r.logger.ZapLogger.Error("Failed to add subscription", zap.Error(err), zap.Any("userID", userID))

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 )
 
 type CacheObject struct {
@@ -34,6 +35,7 @@ func (r *CacheObject) Open(url string, conn_timeout time.Duration) error {
 		return err
 	}
 	opts.DialTimeout = conn_timeout
+	opts.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled}
 	r.Connect = redis.NewClient(opts)
 	return nil
 }

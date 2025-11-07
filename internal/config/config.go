@@ -167,7 +167,6 @@ func NewConfig() (*Config, error) {
 	LOGGER_INFO_FILE_PATH = internal/logger/logs/info.log
 	LOGGER_WARN_FILE_PATH = internal/logger/logs/warn.log
 	LOGGER_ERROR_FILE_PATH = internal/logger/logs/error.log
-	LOGGER_FATAL_FILE_PATH = internal/logger/logs/fatal.log
 	LOGGER_DEBUG_FILE_PATH = internal/logger/logs/debug.log
 	*/
 	loggerInfoPath := os.Getenv("LOGGER_INFO_FILE_PATH")
