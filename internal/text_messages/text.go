@@ -42,6 +42,18 @@ var TextCommandForHelp = []textCommandForHelp{
 		Command: "/help",
 		Text:    "💬 Список команд — напоминание для странника, ищущего путь.",
 	},
+	{
+		Command: "/buySubscription",
+		Text:    "⭐ Получить подписку — открой доступ к премиум-возможностям для ещё большего погружения.",
+	},
+	{
+		Command: "/terms",
+		Text:    "📄 Пользовательское соглашение — подробнее о правилах сервиса.",
+	},
+	{
+		Command: "/support",
+		Text:    "🆘 Поддержка — связь с магистрами, которые готовы помочь.",
+	},
 }
 
 // здесь сплита нет - передается единое сообщение
@@ -191,3 +203,22 @@ func CreateExtensionMessage(ext *models.Extension) string {
 var NameBasicSubscription = "Adventure+ Subscription"
 
 var DescriptionBasicSubsription = `Больше ходов, больше сюжетов, больше магии! Стань автором бесконечных приключений.`
+
+var TextSupportInfo = `Заглушка support`
+
+var TextTermsOfService = `Заглушка terms`
+
+var TextSendInvoiceSubscription = `💫 Счёт на оплату отправлен!
+Следуйте инструкциям Telegram, чтобы завершить покупку подписки.`
+
+var TextSubscriptionActivated = `🌟 Подписка активирована!
+Ваши возможности выросли — теперь вы можете создавать гораздо больше историй!`
+
+var TextErrorProcessPayment = `🚫 Произошла ошибка при обработке платежа.
+Свяжитесь с поддержкой через /support, чтобы решить проблему.`
+
+
+var TextErrorActivateSubscription = `⚠️ Не удалось активировать подписку.
+Пожалуйста, обратитесь в поддержку через /support.`
+
+var TextAlreadyActiveSubscription = `💫 Подписка уже активна. Повторная покупка недоступна.`

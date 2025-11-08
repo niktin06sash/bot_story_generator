@@ -132,8 +132,8 @@ func NewBotCommand(cmdType string, userID int64, chargeID string) BotCommand {
 type PaymentData struct {
 	ChargeID       string
 	Currency       string
-	TotalAmount    int
 	InvoicePayload string
+	TotalAmount    int
 }
 
 // NewPaymentData создает новые данные платежа
@@ -141,7 +141,7 @@ func NewPaymentData(chargeID, currency, invoicePayload string, totalAmount int) 
 	return &PaymentData{
 		ChargeID:       chargeID,
 		Currency:       currency,
-		TotalAmount:    totalAmount,
 		InvoicePayload: invoicePayload,
+		TotalAmount:    totalAmount,
 	}
 }

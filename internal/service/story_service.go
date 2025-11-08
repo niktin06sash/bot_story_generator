@@ -355,10 +355,26 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	return []string{text_messages.TextSuccessStopStory}, nil
 }
 
-func (s *StoryServiceImpl) AddSubscription(ctx context.Context, userID int64, chargeID string) error {
+func (s *StoryServiceImpl) AddSubscription(ctx context.Context, userID int64, chargeID string, payload string) error {
 	place := "AddSubscription"
-	//что-то придумать с датой подписки
-	sub := models.NewSubscription(chargeID, userID, "base", time.Now().AddDate(0, 0, 30))
+	// Получаем префикс у payload (до первого знака подчёркивания, если есть)
+	firstPrefix := payload
+	if idx := strings.Index(payload, "_"); idx != -1 {
+		firstPrefix = payload[:idx]
+	}
+	// Создаем аргументы подписки
+	var timeSubscription time.Time
+	var nameSubscription string
+	switch firstPrefix {
+	case "Adventure+":
+		timeSubscription = time.Now().AddDate(0, 0, 30)
+		// Возможно потом вынести в конфиг
+		nameSubscription = "Adventure+"
+	default:
+		s.Logger.ZapLogger.Error("Unknown subscription type in payload", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("place", place))
+		return fmt.Errorf("server: unknown subscription type: %s", firstPrefix)
+	}
+	sub := models.NewSubscription(chargeID, userID, nameSubscription, timeSubscription, payload)
 	err := s.DBStory.AddSubscription(ctx, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))

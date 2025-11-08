@@ -5,6 +5,7 @@ CREATE TABLE subscriptions (
     startDate TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     endDate TIMESTAMP WITH TIME ZONE NOT NULL,
     isAutoRenewal BOOLEAN DEFAULT TRUE,
+    payload TEXT NOT NULL,
     CONSTRAINT fk_user
         FOREIGN KEY (userID)
         REFERENCES users(ID)

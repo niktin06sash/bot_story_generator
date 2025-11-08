@@ -8,6 +8,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"fmt"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -108,8 +109,8 @@ func (bot *Bot) readIncommingMessage() {
 					zap.Int64("user_id", query.From.ID),
 				)
 
-				// Проверяем payload подписки
-				if query.InvoicePayload != "sub_payload_unique" {
+				// Проверяем, что payload соответствует ожидаемому формату Adventure+_<userID>_<timestamp>
+				if !strings.HasPrefix(query.InvoicePayload, "Adventure+") {
 					bot.logger.ZapLogger.Warn("Invalid invoice payload",
 						zap.String("payload", query.InvoicePayload),
 						zap.String("query_id", query.ID),
@@ -146,15 +147,15 @@ func (bot *Bot) readIncommingMessage() {
 				payment := update.Message.SuccessfulPayment // объект успешного платежа из сообщения
 				userID := update.Message.From.ID            // ID пользователя, совершившего платеж
 				msgID := update.Message.MessageID           // ID Telegram-сообщения, связанного с платежом
-				chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
-
-				// tgChargeID := payment.TelegramPaymentChargeID
+				chargeID := payment.TelegramPaymentChargeID // Используем от телеги charge id, потому что провайдера нет
+				// chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
 
 				bot.logger.ZapLogger.Info("Received successful payment",
 					zap.Int64("user_id", userID),
 					zap.String("charge_id", chargeID),
 					zap.String("currency", payment.Currency),
 					zap.Int("total_amount", payment.TotalAmount),
+					zap.String("payload", payment.InvoicePayload),
 				)
 
 				// Передаем данные платежа в роутер через arguments
@@ -467,10 +468,6 @@ func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 	name := text_messages.NameBasicSubscription
 	// Описание подписки (видно пользователю)
 	description := text_messages.DescriptionBasicSubsription
-	// Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
-	// обязательно надо добавить payload для подписки из уникального ключа, который будем знать только мы
-	// TODO сделать отдельный слой с генерацией payload подписки
-	payload := "sub_payload_unique"
 	// providerToken — токен платежного провайдера. Для Stars (XTR) оставляем пустым
 	provideToken := ""
 	// startParameter — строка для deep-link, обычно пустая если не требуется стартовая ссылка
@@ -481,6 +478,9 @@ func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 	prices := []tgbotapi.LabeledPrice{
 		{Label: description, Amount: bot.priceBasicSubscription}, // Сумма в Stars
 	}
+	// Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
+	nameSubscription := "Adventure+"
+	payload := fmt.Sprintf("%s_%s_%d_%d", nameSubscription, currency, userID, time.Now().Unix())
 
 	// Формируем invoice для оплаты подписки через Stars/XTR Telegram
 	invoice := tgbotapi.NewInvoice(
@@ -497,8 +497,6 @@ func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 	// Предлагаем чаевые при оплате подписки, но для XTR их нет, но строку надо оставить, иначе ошибка
 	invoice.SuggestedTipAmounts = []int{}
 
-	// Примечание: Если используется сторонний провайдер (providerToken), его указываем вместо "", если только Stars — оставлять пустым (поддерживается с tgbotapi v5.13+)
-	// Рекуррентные параметры на уровне InvoiceConfig не поддерживаются. Повторные списания на стороне Stars/Telegram.
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
 		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", userID))

@@ -18,7 +18,7 @@ type StoryService interface {
 	CreateUser(ctx context.Context, userID int64) ([]string, error)
 	StopStory(ctx context.Context, userID int64) ([]string, error)
 	StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error)
-	AddSubscription(ctx context.Context, userID int64, chargeID string) error
+	AddSubscription(ctx context.Context, userID int64, chargeID string, payload string) error
 	GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 }
 
@@ -183,37 +183,58 @@ func (r *StoryRouterImpl) routerWorker() {
 				// Обработка успешной оплаты подписки
 				//2 лог
 				r.logger.ZapLogger.Info("Processing successful payment...", zap.Any("userID", userID))
-				//чел не сможет вызвать successful_payments с нужными данными?
 				// Получаем данные платежа из arguments
 				paymentData, ok := args.(*models.PaymentData)
 				//проверка на отсутствие аргументов при вызове
 				if !ok || paymentData == nil {
 					r.logger.ZapLogger.Error("Invalid payment data format", zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "Ошибка обработки платежа. Обратитесь в поддержку.")
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorProcessPayment)
 					r.cleanUserState(userID)
 					continue
 				}
-				// TODO вынести потом в сервис это
-				// * То, что щас, делала ии
-				// TODO время на которае дается подписка убрать в из хардкора
+
 				// Сохраняем подписку в БД через сервис
-				err := r.service.AddSubscription(r.ctx, userID, paymentData.ChargeID)
+				chargeID := paymentData.ChargeID
+				payload := paymentData.InvoicePayload
+
+				err := r.service.AddSubscription(r.ctx, userID, chargeID, payload)
 				if err != nil {
 					r.logger.ZapLogger.Error("Failed to add subscription", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "Ошибка активации подписки. Обратитесь в поддержку.")
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorActivateSubscription)
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, "Подписка активирована! Наслаждайтесь неограниченными историями.")
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextSubscriptionActivated)
 				r.cleanUserState(userID)
 
 			} else if data == "buySubscription" {
-				// * То, что щас, делала ии
 				// Обработка команды покупки подписки
-				//проверить что у пользователя нет активной подписки
-				r.logger.ZapLogger.Info("User requested to buy subscription...", zap.Any("userID", userID))
+				// Проверяем, что нет активной подписки
+				sub, err := r.service.GetUserSubscription(r.ctx, userID)
+				if err != nil {
+					r.logger.ZapLogger.Error("Failed to get user subscription", zap.Error(err), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorProcessPayment)
+					r.cleanUserState(userID)
+					continue
+				}
+				if sub != nil {
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextAlreadyActiveSubscription)
+					r.cleanUserState(userID)
+					continue
+				}
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextSendInvoiceSubscription)
 				r.createBotCommand(userID, models.BotCommandSendSubscriptionInvoice, "")
-				r.createOutboundMessage(r.ctx, userID, "Счёт на оплату отправлен. Следуйте инструкциям Telegram для завершения покупки подписки.")
+				r.cleanUserState(userID)
+			
+			} else if data == "terms" {
+				// Обработка запроса на просмотр пользовательского соглашения (terms)
+				r.logger.ZapLogger.Info("User requested terms of service...", zap.Any("userID", userID))
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextTermsOfService)
+				r.cleanUserState(userID)
+			} else if data == "support" {
+				// Обработка запроса на поддержку
+				r.logger.ZapLogger.Info("User requested support...", zap.Any("userID", userID))
+				r.createOutboundMessage(r.ctx, userID, text_messages.TextSupportInfo)
 				r.cleanUserState(userID)
 			} else {
 				//2 лог

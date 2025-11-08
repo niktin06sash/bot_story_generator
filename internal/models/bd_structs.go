@@ -93,9 +93,10 @@ type Subscription struct {
 	StartDate     time.Time `json:"start_date"`
 	EndDate       time.Time `json:"end_date"`
 	IsAutoRenewal bool      `json:"is_auto_renewal"`
+	Payload       string    `json:"payload"`
 }
 
-func NewSubscription(chargeId string, userID int64, t string, endtime time.Time) *Subscription {
+func NewSubscription(chargeId string, userID int64, t string, endtime time.Time, payload string) *Subscription {
 	return &Subscription{
 		UserID:        userID,
 		Type:          t,
@@ -103,5 +104,6 @@ func NewSubscription(chargeId string, userID int64, t string, endtime time.Time)
 		EndDate:       endtime,
 		IsAutoRenewal: true,
 		ChargeId:      chargeId,
+		Payload:       payload,
 	}
 }

@@ -248,8 +248,8 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, storyID int
 // AddSubscription добавляет новую подписку для пользователя
 func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
 	query := `
-		INSERT INTO subscriptions (userID, type, startDate, endDate, isAutoRenewal, chargeId)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO subscriptions (userID, type, startDate, endDate, isAutoRenewal, chargeId, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 	_, err := s.databaseclient.Pool.Exec(ctx, query,
 		subscription.UserID,
@@ -258,6 +258,7 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 		subscription.EndDate,
 		subscription.IsAutoRenewal,
 		subscription.ChargeId,
+		subscription.Payload,
 	)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
@@ -268,7 +269,7 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 // GetUserSubscription возвращает подписку пользователя по userID
 func (s *StoryDatabaseImpl) GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
 	query := `
-		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId
+		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId, payload
 		FROM subscriptions
 		WHERE userID = $1
 		ORDER BY endDate DESC
@@ -284,6 +285,7 @@ func (s *StoryDatabaseImpl) GetUserSubscription(ctx context.Context, userID int6
 		&subscription.EndDate,
 		&subscription.IsAutoRenewal,
 		&subscription.ChargeId,
+		&subscription.Payload,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
