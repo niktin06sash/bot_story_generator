@@ -301,7 +301,7 @@ func (s *StoryDatabaseImpl) UpdatePendingSubscription(ctx context.Context, paylo
 }
 
 // GetUserSubscription возвращает подписку пользователя по userID
-func (s *StoryDatabaseImpl) GetActiveSubscription(ctx context.Context, userID int64) ([]*models.Subscription, error) {
+func (s *StoryDatabaseImpl) GetActiveSubscriptions(ctx context.Context, userID int64) ([]*models.Subscription, error) {
 	query := `
 		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId, payload, status, currency, price
         FROM subscriptions 

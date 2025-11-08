@@ -43,7 +43,7 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Database-connect")
 	defer pgx.Close()
-	storyDatabase := repository.NewStoryDatabase(cfg, pgx)
+	storyDatabase := repository.NewStoryDatabase(pgx)
 
 	//ии(подключение + методы ии)
 	aiConn, err := ai.NewAIConnection(cfg, logger, cfg.AI.Model)
@@ -68,7 +68,7 @@ func main() {
 	defer c.Close()
 	storyCache := repository.NewStoryCache(c)
 	//бизнес-логика(база данных + ии)
-	storyService := service.NewStoryService(storyDatabase, aiB, storyCache, logger)
+	storyService := service.NewStoryService(cfg, storyDatabase, aiB, storyCache, logger)
 
 	//роутер
 	router := router.NewRouter(cfg, storyService, logger)
