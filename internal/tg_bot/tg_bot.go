@@ -6,7 +6,6 @@ import (
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"context"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,6 +147,8 @@ func (bot *Bot) readIncommingMessage() {
 				userID := update.Message.From.ID            // ID пользователя, совершившего платеж
 				msgID := update.Message.MessageID           // ID Telegram-сообщения, связанного с платежом
 				chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
+
+				// tgChargeID := payment.TelegramPaymentChargeID
 
 				bot.logger.ZapLogger.Info("Received successful payment",
 					zap.Int64("user_id", userID),
@@ -308,18 +309,6 @@ func (bot *Bot) sendBotCommand(ch chan models.BotCommand) {
 					zap.Any("userID", cmd.UserID),
 				)
 				bot.sendSubscriptionInvoice(cmd.UserID)
-			case models.BotCommandCancelSubscription:
-				bot.logger.ZapLogger.Info(
-					"Executing cancel subscription command",
-					zap.Any("userID", cmd.UserID),
-					zap.String("chargeID", cmd.ChargeID),
-				)
-				bot.cancelSubscription(cmd.UserID, cmd.ChargeID)
-				// Можно отправить сообщение пользователю, что подписка отменена
-				_, err := bot.sendMessage(cmd.UserID, "Ваша подписка отменена.", nil)
-				if err != nil {
-					continue
-				}
 			default:
 				bot.logger.ZapLogger.Warn(
 					"Unknown bot command type",
@@ -469,25 +458,45 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 	}
 }
 
-// где здесь время на сколько дней покупается?
+// где здесь время на сколько дней покупается? - оно в инвойсе не указывается, мы сами его задаем при добавлении в бд
 // * Функция отправки инвойса с подпиской
 func (bot *Bot) sendSubscriptionInvoice(userID int64) {
+	// Формируем данные для инвойса
+
+	// Название подписки (видно пользователю)
+	name := text_messages.NameBasicSubscription
+	// Описание подписки (видно пользователю)
+	description := text_messages.DescriptionBasicSubsription
+	// Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
+	// обязательно надо добавить payload для подписки из уникального ключа, который будем знать только мы
+	// TODO сделать отдельный слой с генерацией payload подписки
+	payload := "sub_payload_unique"
+	// providerToken — токен платежного провайдера. Для Stars (XTR) оставляем пустым
+	provideToken := ""
+	// startParameter — строка для deep-link, обычно пустая если не требуется стартовая ссылка
+	startParameter := ""
+	// название валюты. Для Telegram Stars нужно использовать "XTR"
+	currency := "XTR"
+	// массив цен (LabeledPrice), здесь одна строка с суммой подписки
 	prices := []tgbotapi.LabeledPrice{
-		{Label: "Monthly Unlimited Stories", Amount: bot.priceBasicSubscription}, // Сумма в Stars
+		{Label: description, Amount: bot.priceBasicSubscription}, // Сумма в Stars
 	}
-	//обязательно надо добавить payload для подписки из уникального ключа, который будем знать только мы
-	//TODO сделать отдельный слой с генерацией payload подписки
+
 	// Формируем invoice для оплаты подписки через Stars/XTR Telegram
 	invoice := tgbotapi.NewInvoice(
-		userID,                              // userID пользователя, которому отправляем инвойс
-		"Premium Subscription",              // Название инвойса (видно пользователю)
-		"Unlock unlimited story generation", // Описание подписки (видно пользователю)
-		"sub_payload_unique",                // Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
-		"",                                  // providerToken — токен платежного провайдера. Для Stars (XTR) оставляем пустым
-		"XTR",                               // название валюты. Для Telegram Stars нужно использовать "XTR"
-		"",                                  // startParameter — строка для deep-link, обычно пустая если не требуется стартовая ссылка
-		prices,                              // массив цен (LabeledPrice), здесь одна строка с суммой подписки
+		userID,
+		name,
+		description,
+		payload,
+		provideToken,
+		startParameter,
+		currency,
+		prices,
 	)
+
+	// Предлагаем чаевые при оплате подписки, но для XTR их нет, но строку надо оставить, иначе ошибка
+	invoice.SuggestedTipAmounts = []int{}
+
 	// Примечание: Если используется сторонний провайдер (providerToken), его указываем вместо "", если только Stars — оставлять пустым (поддерживается с tgbotapi v5.13+)
 	// Рекуррентные параметры на уровне InvoiceConfig не поддерживаются. Повторные списания на стороне Stars/Telegram.
 	msg, err := bot.api.Send(invoice)
@@ -495,19 +504,6 @@ func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", userID))
 	} else {
 		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("message", msg), zap.Any("userID", userID))
-	}
-}
-
-// * Функция отмены подписки
-func (bot *Bot) cancelSubscription(userID int64, chargeID string) {
-	params := tgbotapi.Params{
-		"user_id":   strconv.FormatInt(userID, 10),
-		"charge_id": chargeID,
-		"restore":   "false", // Или true для разрешения повторной активации
-	}
-	_, err := bot.api.MakeRequest("botCancelStarsSubscription", params)
-	if err != nil {
-		bot.logger.ZapLogger.Error("Cancel error:", zap.Error(err))
 	}
 }
 

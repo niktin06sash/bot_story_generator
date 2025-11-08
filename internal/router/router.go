@@ -179,31 +179,6 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.cleanUserState(userID)
 
-			} else if data == "cancelSubscription" {
-				r.mux.RLock()
-				_, ok := r.admins[userID]
-				r.mux.RUnlock()
-				if !ok {
-					r.logger.ZapLogger.Info("User entered a cancelSubscription command...", zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
-					r.cleanUserState(userID)
-					continue
-				}
-				// TODO вынести потом в сервис это
-				// * То, что щас, делала ии
-				// Получаем подписку пользователя из БД
-				//здесь надо попробовать за один запрос в бд отменить подписку(главное не удалять chargeID из базы данных) + получить данные chargeID о ней
-				subscription, err := r.service.GetUserSubscription(r.ctx, userID)
-				if err != nil {
-					r.logger.ZapLogger.Error("Failed to get user subscription", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "Ошибка при получении данных подписки. Обратитесь в поддержку.")
-					r.cleanUserState(userID)
-					continue
-				}
-				r.createBotCommand(userID, models.BotCommandCancelSubscription, subscription.ChargeId)
-				//TODO отменить подписку в бд
-				r.cleanUserState(userID)
-
 			} else if data == "successful_payment" {
 				// Обработка успешной оплаты подписки
 				//2 лог
@@ -232,7 +207,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(r.ctx, userID, "Подписка активирована! Наслаждайтесь неограниченными историями.")
 				r.cleanUserState(userID)
 
-			} else if data == "buy_subscription" {
+			} else if data == "buySubscription" {
 				// * То, что щас, делала ии
 				// Обработка команды покупки подписки
 				//проверить что у пользователя нет активной подписки

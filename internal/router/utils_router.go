@@ -23,7 +23,7 @@ func (r *StoryRouterImpl) createDeleteMessage(userID int64, msgID int) {
 	select {
 	case <-r.ctx.Done():
 		return
-	case r.chan_edit <- models.NewDeleteMessage(userID, msgID):
+	case r.chan_delete <- models.NewDeleteMessage(userID, msgID):
 	}
 }
 func (r *StoryRouterImpl) createBotCommand(userID int64, t string, chargeID string) {

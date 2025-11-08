@@ -53,8 +53,8 @@ type DeleteMessage struct {
 	MsgID  int
 }
 
-func NewDeleteMessage(userID int64, msgID int) EditMessage {
-	return EditMessage{UserID: userID, MsgID: msgID}
+func NewDeleteMessage(userID int64, msgID int) DeleteMessage {
+	return DeleteMessage{UserID: userID, MsgID: msgID}
 }
 
 // GenerateSchema генерирует JSON схему для типа T
@@ -110,7 +110,6 @@ type Extension struct {
 // TODO мб потом передеать
 const (
 	BotCommandSendSubscriptionInvoice = "send_subscription_invoice"
-	BotCommandCancelSubscription      = "cancel_subscription"
 )
 
 // BotCommand представляет команду для выполнения ботом
@@ -120,19 +119,10 @@ type BotCommand struct {
 	ChargeID string // Для cancelSubscription
 }
 
-// NewBotCommandWithChatID создает команду с указанным chatID
+// NewBotCommand создает команду с указанным chatID
 func NewBotCommand(cmdType string, userID int64, chargeID string) BotCommand {
 	return BotCommand{
 		Type:     cmdType,
-		UserID:   userID,
-		ChargeID: chargeID,
-	}
-}
-
-// NewBotCommandCancelSubscription создает команду отмены подписки
-func NewBotCommandCancelSubscription(userID int64, chargeID string) BotCommand {
-	return BotCommand{
-		Type:     BotCommandCancelSubscription,
 		UserID:   userID,
 		ChargeID: chargeID,
 	}

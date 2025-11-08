@@ -187,3 +187,7 @@ func CreateExtensionMessage(ext *models.Extension) string {
 	msg += Divider
 	return msg
 }
+
+var NameBasicSubscription = "Adventure+ Subscription"
+
+var DescriptionBasicSubsription = `Больше ходов, больше сюжетов, больше магии! Стань автором бесконечных приключений.`
