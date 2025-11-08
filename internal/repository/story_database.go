@@ -1,11 +1,11 @@
 package repository
 
 import (
-	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/database"
 	"bot_story_generator/internal/models"
 	"errors"
 	"fmt"
+	"time"
 
 	"context"
 
@@ -14,13 +14,11 @@ import (
 
 type StoryDatabaseImpl struct {
 	databaseclient *database.DBObject
-	tokenDayLimit  int
 }
 
-func NewStoryDatabase(cfg *config.Config, db *database.DBObject) *StoryDatabaseImpl {
+func NewStoryDatabase(db *database.DBObject) *StoryDatabaseImpl {
 	return &StoryDatabaseImpl{
 		databaseclient: db,
-		tokenDayLimit:  cfg.Setting.TokenDayLimit,
 	}
 }
 
@@ -165,7 +163,7 @@ func (s *StoryDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64) (*m
 	err := row.Scan(&limit.UserID, &limit.Date, &limit.Count, &limit.LimitCount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return models.NewDailyLimit(userID, 0, s.tokenDayLimit), nil
+			return nil, nil
 		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
@@ -248,18 +246,54 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, storyID int
 // AddSubscription добавляет новую подписку для пользователя
 func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
 	query := `
-		INSERT INTO subscriptions (userID, type, startDate, endDate, isAutoRenewal, chargeId, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO subscriptions (userID, type, isAutoRenewal, payload, currency, price, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	_, err := s.databaseclient.Pool.Exec(ctx, query,
 		subscription.UserID,
 		subscription.Type,
-		subscription.StartDate,
-		subscription.EndDate,
 		subscription.IsAutoRenewal,
-		subscription.ChargeId,
 		subscription.Payload,
+		subscription.Currency,
+		subscription.Price,
+		subscription.Status,
 	)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}
+func (s *StoryDatabaseImpl) GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error) {
+	query := `
+		SELECT userID, type, isAutoRenewal, payload, currency, price, status
+		FROM subscriptions 
+        WHERE userID = $1 AND payload = $2 AND status = 'pending'
+	`
+	row := s.databaseclient.Pool.QueryRow(ctx, query, userID, payload)
+	sub := &models.Subscription{}
+	err := row.Scan(&sub.UserID, &sub.Type, &sub.IsAutoRenewal, &sub.Payload, &sub.Currency, &sub.Price, &sub.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("client: undefined payload")
+		}
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	return sub, nil
+}
+func (s *StoryDatabaseImpl) UpdatePendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error {
+	query := `
+		UPDATE subscriptions 
+        SET 
+            status = 'paid',
+            startDate = $3,
+            endDate = $4,
+            chargeId = $5
+        WHERE 
+            userID = $1 
+            AND payload = $2 
+            AND status = 'pending'
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, payload, start, end, changeID)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}
@@ -267,31 +301,31 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 }
 
 // GetUserSubscription возвращает подписку пользователя по userID
-func (s *StoryDatabaseImpl) GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+func (s *StoryDatabaseImpl) GetActiveSubscription(ctx context.Context, userID int64) ([]*models.Subscription, error) {
 	query := `
-		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId, payload
-		FROM subscriptions
-		WHERE userID = $1
-		ORDER BY endDate DESC
-		LIMIT 1
+		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId, payload, status, currency, price
+        FROM subscriptions 
+        WHERE userID = $1
+        AND endDate > NOW()
+		AND status = 'paid'
 	`
-	row := s.databaseclient.Pool.QueryRow(ctx, query, userID)
-
-	subscription := &models.Subscription{}
-	err := row.Scan(
-		&subscription.UserID,
-		&subscription.Type,
-		&subscription.StartDate,
-		&subscription.EndDate,
-		&subscription.IsAutoRenewal,
-		&subscription.ChargeId,
-		&subscription.Payload,
-	)
+	rows, err := s.databaseclient.Pool.Query(ctx, query, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // Нет подписки
-		}
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
-	return subscription, nil
+	defer rows.Close()
+
+	var subs []*models.Subscription
+	for rows.Next() {
+		sub := &models.Subscription{}
+		err := rows.Scan(&sub.UserID, &sub.Type, &sub.StartDate, &sub.EndDate, &sub.IsAutoRenewal, &sub.ChargeId, &sub.Payload, &sub.Status, &sub.Currency, &sub.Price)
+		if err != nil {
+			return nil, fmt.Errorf("server: database error: %w", err)
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	return subs, nil
 }

@@ -18,44 +18,49 @@ type StoryService interface {
 	CreateUser(ctx context.Context, userID int64) ([]string, error)
 	StopStory(ctx context.Context, userID int64) ([]string, error)
 	StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error)
-	AddSubscription(ctx context.Context, userID int64, chargeID string, payload string) error
-	GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error)
+	ValidatePreCheckout(ctx context.Context, pd models.PaymentData) error
+	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
+	CommitSubscription(ctx context.Context, pd models.PaymentData) error
 }
 
 type StoryRouterImpl struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	service       StoryService
-	chan_command  chan models.IncommingMessage
-	chan_outbound chan models.OutboundMessage
-	chan_edit     chan models.EditMessage
-	chan_delete   chan models.DeleteMessage
-	chan_bot_cmd  chan models.BotCommand
-	logger        *logger.Logger
-	userState     map[int64]struct{}
-	admins        map[int64]struct{}
-	mux           *sync.RWMutex
-	wg            *sync.WaitGroup
-	numworkers    int
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	service                StoryService
+	chan_command           chan models.IncommingMessage
+	chan_outbound_payments chan models.PaymentData
+	chan_outbound          chan models.OutboundMessage
+	chan_edit              chan models.EditMessage
+	chan_delete            chan models.DeleteMessage
+	chan_bot_invoice       chan models.InvoiceMessage
+	chan_payments          chan models.PaymentData
+	logger                 *logger.Logger
+	userState              map[int64]struct{}
+	admins                 map[int64]struct{}
+	mux                    *sync.RWMutex
+	wg                     *sync.WaitGroup
+	numworkers             int
 }
 
 func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) *StoryRouterImpl {
 	context, cancel := context.WithCancel(context.Background())
 	routerImpl := &StoryRouterImpl{
-		ctx:           context,
-		cancel:        cancel,
-		service:       service,
-		chan_command:  make(chan models.IncommingMessage, 1000),
-		chan_outbound: make(chan models.OutboundMessage, 1000),
-		chan_edit:     make(chan models.EditMessage, 1000),
-		chan_delete:   make(chan models.DeleteMessage, 1000),
-		chan_bot_cmd:  make(chan models.BotCommand, 1000),
-		userState:     make(map[int64]struct{}),
-		admins:        cfg.Setting.Admins,
-		mux:           &sync.RWMutex{},
-		logger:        logger,
-		wg:            &sync.WaitGroup{},
-		numworkers:    cfg.Setting.NumWorkers,
+		ctx:                    context,
+		cancel:                 cancel,
+		service:                service,
+		chan_command:           make(chan models.IncommingMessage, 1000),
+		chan_outbound_payments: make(chan models.PaymentData, 1000),
+		chan_payments:          make(chan models.PaymentData, 1000),
+		chan_outbound:          make(chan models.OutboundMessage, 1000),
+		chan_edit:              make(chan models.EditMessage, 1000),
+		chan_delete:            make(chan models.DeleteMessage, 1000),
+		chan_bot_invoice:       make(chan models.InvoiceMessage, 1000),
+		userState:              make(map[int64]struct{}),
+		admins:                 cfg.Setting.Admins,
+		mux:                    &sync.RWMutex{},
+		logger:                 logger,
+		wg:                     &sync.WaitGroup{},
+		numworkers:             cfg.Setting.NumWorkers,
 	}
 
 	return routerImpl
@@ -67,6 +72,53 @@ func (r *StoryRouterImpl) StartRouter() {
 			defer r.wg.Done()
 			r.routerWorker()
 		}()
+		go func() {
+			defer r.wg.Done()
+			r.paymentWorker()
+		}()
+	}
+}
+func (r *StoryRouterImpl) paymentWorker() {
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case data, ok := <-r.chan_payments:
+			{
+				if !ok {
+					return
+				}
+				r.mux.Lock()
+				if _, ok := r.userState[data.UserID]; ok {
+					r.mux.Unlock()
+					continue
+				}
+				r.userState[data.UserID] = struct{}{}
+				r.mux.Unlock()
+				if data.ChargeID == "" && data.QueryID != "" {
+					err := r.service.ValidatePreCheckout(r.ctx, data)
+					if err != nil {
+						data.Error = err
+						r.createPaymentMessage(data)
+						r.cleanUserState(data.UserID)
+						continue
+					}
+					r.createPaymentMessage(data)
+					r.cleanUserState(data.UserID)
+
+				} else if data.ChargeID != "" && data.QueryID == "" {
+					err := r.service.CommitSubscription(r.ctx, data)
+					if err != nil {
+						data.Error = err
+						r.createPaymentMessage(data)
+						r.cleanUserState(data.UserID)
+						continue
+					}
+					r.createPaymentMessage(data)
+					r.cleanUserState(data.UserID)
+				}
+			}
+		}
 	}
 }
 func (r *StoryRouterImpl) routerWorker() {
@@ -88,7 +140,6 @@ func (r *StoryRouterImpl) routerWorker() {
 			data := msg.Data
 			userID := msg.UserID
 			msgID := msg.MsgID
-			args := msg.Arguments
 
 			if data == "start" {
 				//2 лог
@@ -179,53 +230,18 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.cleanUserState(userID)
 
-			} else if data == "successful_payment" {
-				// Обработка успешной оплаты подписки
-				//2 лог
-				r.logger.ZapLogger.Info("Processing successful payment...", zap.Any("userID", userID))
-				// Получаем данные платежа из arguments
-				paymentData, ok := args.(*models.PaymentData)
-				//проверка на отсутствие аргументов при вызове
-				if !ok || paymentData == nil {
-					r.logger.ZapLogger.Error("Invalid payment data format", zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorProcessPayment)
-					r.cleanUserState(userID)
-					continue
-				}
-
-				// Сохраняем подписку в БД через сервис
-				chargeID := paymentData.ChargeID
-				payload := paymentData.InvoicePayload
-
-				err := r.service.AddSubscription(r.ctx, userID, chargeID, payload)
-				if err != nil {
-					r.logger.ZapLogger.Error("Failed to add subscription", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorActivateSubscription)
-					r.cleanUserState(userID)
-					continue
-				}
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextSubscriptionActivated)
-				r.cleanUserState(userID)
-
 			} else if data == "buySubscription" {
-				// Обработка команды покупки подписки
-				// Проверяем, что нет активной подписки
-				sub, err := r.service.GetUserSubscription(r.ctx, userID)
+				//2 лог
+				r.logger.ZapLogger.Info("Processing buying subscription...", zap.Any("userID", userID))
+				sub, err := r.service.BuySubscription(r.ctx, userID)
 				if err != nil {
-					r.logger.ZapLogger.Error("Failed to get user subscription", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorProcessPayment)
+					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				if sub != nil {
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextAlreadyActiveSubscription)
-					r.cleanUserState(userID)
-					continue
-				}
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextSendInvoiceSubscription)
-				r.createBotCommand(userID, models.BotCommandSendSubscriptionInvoice, "")
+				r.createInvoiceMessage(sub)
 				r.cleanUserState(userID)
-			
+
 			} else if data == "terms" {
 				// Обработка запроса на просмотр пользовательского соглашения (terms)
 				r.logger.ZapLogger.Info("User requested terms of service...", zap.Any("userID", userID))
@@ -251,21 +267,30 @@ func (r *StoryRouterImpl) routerWorker() {
 	}
 }
 
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int, arguments interface{}) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID, arguments):
+	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID):
 	}
 }
-
-func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.BotCommand) {
-	return r.chan_outbound, r.chan_edit, r.chan_delete, r.chan_bot_cmd
+func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string) {
+	select {
+	case <-r.ctx.Done():
+		return
+	case <-ctx.Done():
+		return
+	case r.chan_payments <- models.NewPaymentData(queryId, currency, payload, amount, userID, chargeID):
+	}
+}
+func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan models.PaymentData) {
+	return r.chan_outbound, r.chan_edit, r.chan_delete, r.chan_bot_invoice, r.chan_outbound_payments
 }
 
-func (r *StoryRouterImpl) CloseCommandChan() {
+func (r *StoryRouterImpl) CloseInputChans() {
+	close(r.chan_payments)
 	close(r.chan_command)
 }
 
@@ -275,6 +300,7 @@ func (r *StoryRouterImpl) Stop() {
 	close(r.chan_outbound)
 	close(r.chan_edit)
 	close(r.chan_delete)
-	close(r.chan_bot_cmd)
+	close(r.chan_bot_invoice)
+	close(r.chan_outbound_payments)
 	r.logger.ZapLogger.Debug("Successful stopped Router-Workers")
 }

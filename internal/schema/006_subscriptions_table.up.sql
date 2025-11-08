@@ -1,11 +1,14 @@
 CREATE TABLE subscriptions (
-    chargeId TEXT PRIMARY KEY,
+    payload TEXT PRIMARY KEY,
+    chargeId TEXT,
     userID BIGINT NOT NULL,
-    type TEXT NOT NULL,                 
-    startDate TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    endDate TIMESTAMP WITH TIME ZONE NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,                 
+    startDate TIMESTAMP WITH TIME ZONE,
+    endDate TIMESTAMP WITH TIME ZONE,
     isAutoRenewal BOOLEAN DEFAULT TRUE,
-    payload TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    price INT NOT NULL,
     CONSTRAINT fk_user
         FOREIGN KEY (userID)
         REFERENCES users(ID)

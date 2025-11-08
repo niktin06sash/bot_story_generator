@@ -8,7 +8,6 @@ import (
 	"context"
 	"strings"
 	"sync"
-	"fmt"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -16,21 +15,21 @@ import (
 )
 
 type Bot struct {
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	updatesChan            tgbotapi.UpdatesChannel
-	api                    *tgbotapi.BotAPI
-	logger                 *logger.Logger
-	router                 StoryRouter
-	wg                     *sync.WaitGroup
-	numworkers             int
-	priceBasicSubscription int
+	ctx         context.Context
+	cancel      context.CancelFunc
+	updatesChan tgbotapi.UpdatesChannel
+	api         *tgbotapi.BotAPI
+	logger      *logger.Logger
+	router      StoryRouter
+	wg          *sync.WaitGroup
+	numworkers  int
 }
 
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments interface{})
-	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.BotCommand)
-	CloseCommandChan()
+	AddComand(ctx context.Context, data string, userID int64, msgID int)
+	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string)
+	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan models.PaymentData)
+	CloseInputChans()
 }
 
 func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot, error) {
@@ -51,23 +50,22 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 	updates := bot.GetUpdatesChan(u)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Bot{
-		ctx:                    ctx,
-		cancel:                 cancel,
-		api:                    bot,
-		logger:                 logger,
-		updatesChan:            updates,
-		router:                 router,
-		wg:                     &sync.WaitGroup{},
-		numworkers:             cfg.Setting.NumWorkers,
-		priceBasicSubscription: cfg.Setting.PriceBasicSubscription,
+		ctx:         ctx,
+		cancel:      cancel,
+		api:         bot,
+		logger:      logger,
+		updatesChan: updates,
+		router:      router,
+		wg:          &sync.WaitGroup{},
+		numworkers:  cfg.Setting.NumWorkers,
 	}, nil
 }
 
 func (bot *Bot) StartBot() {
-	outbound, edit, delete, cmdChan := bot.router.GetRouterChans()
+	outbound, edit, delete, invoiceChan, pdchan := bot.router.GetRouterChans()
 
 	//maybe increase the number of worker-bots(field = numworkers)
-	bot.wg.Add(5)
+	bot.wg.Add(6)
 	go func() {
 		defer bot.wg.Done()
 		bot.readIncommingMessage()
@@ -86,7 +84,11 @@ func (bot *Bot) StartBot() {
 	}()
 	go func() {
 		defer bot.wg.Done()
-		bot.sendBotCommand(cmdChan)
+		bot.sendInvoiceMessage(invoiceChan)
+	}()
+	go func() {
+		defer bot.wg.Done()
+		bot.sendPaymentData(pdchan)
 	}()
 }
 
@@ -101,73 +103,33 @@ func (bot *Bot) readIncommingMessage() {
 			}
 			// Обработка pre-checkout запроса для платежей (Stars/XTR)
 			// PreCheckoutQuery обрабатывается в боте, так как это системный запрос Telegram API
+			//обратиться за проверкой существования заказа в базу данных
+			//асинхронно получить ответ о существовании и подтвердить answerPreCheckoutQuery
 			if update.PreCheckoutQuery != nil {
+				//можно было бы удалить, но я хз где взять айди invoice
 				query := update.PreCheckoutQuery
-				bot.logger.ZapLogger.Info("Received pre-checkout query",
-					zap.String("query_id", query.ID),
-					zap.String("payload", query.InvoicePayload),
-					zap.Int64("user_id", query.From.ID),
-				)
-
-				// Проверяем, что payload соответствует ожидаемому формату Adventure+_<userID>_<timestamp>
-				if !strings.HasPrefix(query.InvoicePayload, "Adventure+") {
-					bot.logger.ZapLogger.Warn("Invalid invoice payload",
-						zap.String("payload", query.InvoicePayload),
-						zap.String("query_id", query.ID),
-					)
-					_, _ = bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
-						"pre_checkout_query_id": query.ID,
-						"ok":                    "false",
-						"error_message":         "Invalid payload",
-					})
-					continue
-				}
-
-				// Подтверждаем pre-checkout
-				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{
-					"pre_checkout_query_id": query.ID,
-					"ok":                    "true",
-				})
-				if err != nil {
-					bot.logger.ZapLogger.Error("Failed to answer pre-checkout query",
-						zap.Error(err),
-						zap.String("query_id", query.ID),
-					)
-				} else {
-					bot.logger.ZapLogger.Info("Pre-checkout query answered successfully",
-						zap.String("query_id", query.ID),
-					)
-				}
+				id := query.ID
+				payload := query.InvoicePayload
+				userID := query.From.ID
+				amount := query.TotalAmount
+				currency := query.Currency
+				bot.logger.ZapLogger.Info("Received PreCheckout query", zap.Any("userID", userID), zap.Any("payload", payload))
+				bot.router.AddPaymentQuery(bot.ctx, userID, payload, id, amount, currency, "")
 				continue
 			}
-
+			//можно будет раскидать по отдельным каналам precheck и successPayment
 			// Обработка успешной оплаты
 			// Передаем данные в роутер для сохранения в БД и отправки сообщения
 			if update.Message != nil && update.Message.SuccessfulPayment != nil {
-				payment := update.Message.SuccessfulPayment // объект успешного платежа из сообщения
-				userID := update.Message.From.ID            // ID пользователя, совершившего платеж
-				msgID := update.Message.MessageID           // ID Telegram-сообщения, связанного с платежом
-				chargeID := payment.TelegramPaymentChargeID // Используем от телеги charge id, потому что провайдера нет
-				// chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
-
-				bot.logger.ZapLogger.Info("Received successful payment",
-					zap.Int64("user_id", userID),
-					zap.String("charge_id", chargeID),
-					zap.String("currency", payment.Currency),
-					zap.Int("total_amount", payment.TotalAmount),
-					zap.String("payload", payment.InvoicePayload),
-				)
-
-				// Передаем данные платежа в роутер через arguments
-				paymentData := models.NewPaymentData(
-					chargeID,               // уникальный идентификатор транзакции (charge_id)
-					payment.Currency,       // валюта платежа, например "XTR"
-					payment.InvoicePayload, // payload инвойса (строка, используемая для проверки типа покупки)
-					payment.TotalAmount,    // общая сумма платежа в минимальных единицах валюты
-				)
-
-				// Отправляем команду в роутер для обработки платежа
-				bot.router.AddComand(bot.ctx, "successful_payment", userID, msgID, paymentData)
+				payment := update.Message.SuccessfulPayment
+				userID := update.Message.From.ID
+				chargeID := payment.TelegramPaymentChargeID
+				payload := payment.InvoicePayload
+				amount := payment.TotalAmount
+				currency := payment.Currency
+				//chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
+				bot.logger.ZapLogger.Info("Received successful payment", zap.Any("userID", userID), zap.Any("payload", payload))
+				bot.router.AddPaymentQuery(bot.ctx, userID, payload, "", amount, currency, chargeID)
 				continue
 			}
 
@@ -176,8 +138,8 @@ func (bot *Bot) readIncommingMessage() {
 				userID := update.CallbackQuery.From.ID
 				msgID := update.CallbackQuery.Message.MessageID
 				//1 лог
-				bot.logger.ZapLogger.Info("Received update", zap.Any("data", data), zap.Any("userID", userID))
-				bot.router.AddComand(bot.ctx, data, userID, msgID, nil)
+				bot.logger.ZapLogger.Info("Received CallbackQuery", zap.Any("userID", userID), zap.Any("data", data))
+				bot.router.AddComand(bot.ctx, data, userID, msgID)
 				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 			} else if update.Message != nil {
 				text := update.Message.Text
@@ -186,14 +148,9 @@ func (bot *Bot) readIncommingMessage() {
 				msgID := msg.MessageID
 				if msg.IsCommand() {
 					//1 лог
-					bot.logger.ZapLogger.Info("Received update", zap.Any("data", text), zap.Any("userID", userID))
+					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text))
 					command := update.Message.Command()
-					if command == "successful_payment" {
-						//костыль что извне нельзя вызывать successful_payment как команду
-						bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
-						continue
-					}
-					bot.router.AddComand(bot.ctx, command, userID, msgID, nil)
+					bot.router.AddComand(bot.ctx, command, userID, msgID)
 				} else {
 					//обычные сообщения также игнорируются
 					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
@@ -293,30 +250,50 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 		}
 	}
 }
-
-func (bot *Bot) sendBotCommand(ch chan models.BotCommand) {
+func (bot *Bot) sendPaymentData(ch chan models.PaymentData) {
 	for {
 		select {
 		case <-bot.ctx.Done():
 			return
-		case cmd, ok := <-ch:
+		case data, ok := <-ch:
+			//разделить в будущем сущности preCheck и successPayment
 			if !ok {
 				return
 			}
-			switch cmd.Type {
-			case models.BotCommandSendSubscriptionInvoice:
-				bot.logger.ZapLogger.Info(
-					"Executing send subscription invoice command",
-					zap.Any("userID", cmd.UserID),
-				)
-				bot.sendSubscriptionInvoice(cmd.UserID)
-			default:
-				bot.logger.ZapLogger.Warn(
-					"Unknown bot command type",
-					zap.String("type", string(cmd.Type)),
-					zap.Any("userID", cmd.UserID),
-				)
+			if data.Error != nil && data.ChargeID == "" && data.QueryID != "" {
+				bot.logger.ZapLogger.Warn("Invalid payment data", zap.Any("queryID", data.QueryID), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "false", "error_message": data.Error.Error()})
+				if err != nil {
+					bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				}
+				continue
+			} else if data.Error == nil && data.ChargeID == "" && data.QueryID != "" {
+				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "true"})
+				if err != nil {
+					bot.logger.ZapLogger.Error("Failed to answer pre-checkout query", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+					continue
+				}
+				bot.logger.ZapLogger.Info("Pre-checkout query answered successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+			} else if data.Error != nil && data.ChargeID != "" && data.QueryID == "" {
+				bot.sendMessage(data.UserID, data.Error.Error(), nil)
+			} else if data.Error == nil && data.ChargeID != "" && data.QueryID == "" {
+				bot.sendMessage(data.UserID, text_messages.TextSubscriptionActivated, nil)
 			}
+		}
+	}
+}
+func (bot *Bot) sendInvoiceMessage(ch chan models.InvoiceMessage) {
+	for {
+		select {
+		case <-bot.ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+
+			//bot.sendMessage(msg.Subscription.UserID, text_messages.TextSendInvoiceSubscription, nil)
+			bot.sendSubscriptionInvoice(msg.Subscription)
 		}
 	}
 }
@@ -459,38 +436,31 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 	}
 }
 
-// где здесь время на сколько дней покупается? - оно в инвойсе не указывается, мы сами его задаем при добавлении в бд
 // * Функция отправки инвойса с подпиской
-func (bot *Bot) sendSubscriptionInvoice(userID int64) {
-	// Формируем данные для инвойса
-
-	// Название подписки (видно пользователю)
+func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 	name := text_messages.NameBasicSubscription
-	// Описание подписки (видно пользователю)
 	description := text_messages.DescriptionBasicSubsription
-	// providerToken — токен платежного провайдера. Для Stars (XTR) оставляем пустым
-	provideToken := ""
-	// startParameter — строка для deep-link, обычно пустая если не требуется стартовая ссылка
-	startParameter := ""
-	// название валюты. Для Telegram Stars нужно использовать "XTR"
-	currency := "XTR"
-	// массив цен (LabeledPrice), здесь одна строка с суммой подписки
-	prices := []tgbotapi.LabeledPrice{
-		{Label: description, Amount: bot.priceBasicSubscription}, // Сумма в Stars
+	var provideToken string
+	var startParameter string
+	if sub.Currency == "XTR" {
+		provideToken = ""
+		startParameter = ""
+	} else {
+		provideToken = ""
+		startParameter = ""
 	}
-	// Payload, который вернётся боту после оплаты — можно использовать для идентификации типа покупки
-	nameSubscription := "Adventure+"
-	payload := fmt.Sprintf("%s_%s_%d_%d", nameSubscription, currency, userID, time.Now().Unix())
+	prices := []tgbotapi.LabeledPrice{
+		{Label: description, Amount: sub.Price},
+	}
 
-	// Формируем invoice для оплаты подписки через Stars/XTR Telegram
 	invoice := tgbotapi.NewInvoice(
-		userID,
+		sub.UserID,
 		name,
 		description,
-		payload,
+		sub.Payload,
 		provideToken,
 		startParameter,
-		currency,
+		sub.Currency,
 		prices,
 	)
 
@@ -499,15 +469,15 @@ func (bot *Bot) sendSubscriptionInvoice(userID int64) {
 
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
-		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", userID))
+		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID))
 	} else {
-		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("message", msg), zap.Any("userID", userID))
+		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID))
 	}
 }
 
 func (bot *Bot) Stop() {
 	bot.cancel()
 	bot.wg.Wait()
-	bot.router.CloseCommandChan()
+	bot.router.CloseInputChans()
 	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
 }

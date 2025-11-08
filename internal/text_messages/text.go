@@ -208,15 +208,16 @@ var TextSupportInfo = `Заглушка support`
 
 var TextTermsOfService = `Заглушка terms`
 
+// придумать текст
+var InvalidPaymentData = "Invalid Payment"
 var TextSendInvoiceSubscription = `💫 Счёт на оплату отправлен!
 Следуйте инструкциям Telegram, чтобы завершить покупку подписки.`
 
 var TextSubscriptionActivated = `🌟 Подписка активирована!
 Ваши возможности выросли — теперь вы можете создавать гораздо больше историй!`
 
-var TextErrorProcessPayment = `🚫 Произошла ошибка при обработке платежа.
+var TextErrorProcessPayment = `🚫 Произошла ошибка при инициализации платежа.
 Свяжитесь с поддержкой через /support, чтобы решить проблему.`
-
 
 var TextErrorActivateSubscription = `⚠️ Не удалось активировать подписку.
 Пожалуйста, обратитесь в поддержку через /support.`

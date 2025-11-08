@@ -54,6 +54,11 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 		s.Logger.ZapLogger.Error("GetDailyLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	//TODO проверить дневные лимиты с учетом подписки
+	if limit == nil {
+		//создаем новый лимит
+		limit = models.NewDailyLimit(userID, 0, s.baseDayLimit)
+	}
 	if limit.LimitCount <= limit.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID), zap.Any("place", LogPlace))
 		//Добавляем превышение лимита в кэш

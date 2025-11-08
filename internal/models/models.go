@@ -6,15 +6,14 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, userID int64, msgID int, arguments interface{}) IncommingMessage {
-	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID, Arguments: arguments}
+func NewIncommingMessage(data string, userID int64, msgID int) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID}
 }
 
 type IncommingMessage struct {
-	Data      string
-	UserID    int64
-	MsgID     int
-	Arguments interface{}
+	Data   string
+	UserID int64
+	MsgID  int
 }
 
 func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
@@ -107,41 +106,37 @@ type Extension struct {
 	Narrative string
 }
 
-// TODO мб потом передеать
-const (
-	BotCommandSendSubscriptionInvoice = "send_subscription_invoice"
-)
-
-// BotCommand представляет команду для выполнения ботом
-type BotCommand struct {
-	Type     string
-	UserID   int64
-	ChargeID string // Для cancelSubscription
+// InvoiceMessage
+type InvoiceMessage struct {
+	Subscription *Subscription
 }
 
-// NewBotCommand создает команду с указанным chatID
-func NewBotCommand(cmdType string, userID int64, chargeID string) BotCommand {
-	return BotCommand{
-		Type:     cmdType,
-		UserID:   userID,
-		ChargeID: chargeID,
+// NewInvoiceMessage создает invoice с указанным chatID
+func NewInvoiceMessage(sub *Subscription) InvoiceMessage {
+	return InvoiceMessage{
+		Subscription: sub,
 	}
 }
 
 // PaymentData представляет данные успешного платежа
 type PaymentData struct {
-	ChargeID       string
+	QueryID        string
+	UserID         int64
 	Currency       string
 	InvoicePayload string
 	TotalAmount    int
+	ChargeID       string
+	Error          error
 }
 
 // NewPaymentData создает новые данные платежа
-func NewPaymentData(chargeID, currency, invoicePayload string, totalAmount int) *PaymentData {
-	return &PaymentData{
-		ChargeID:       chargeID,
+func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount int, userid int64, chargeId string) PaymentData {
+	return PaymentData{
+		QueryID:        queryID,
 		Currency:       currency,
 		InvoicePayload: invoicePayload,
 		TotalAmount:    totalAmount,
+		UserID:         userid,
+		ChargeID:       chargeId,
 	}
 }

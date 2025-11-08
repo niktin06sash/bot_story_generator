@@ -26,11 +26,18 @@ func (r *StoryRouterImpl) createDeleteMessage(userID int64, msgID int) {
 	case r.chan_delete <- models.NewDeleteMessage(userID, msgID):
 	}
 }
-func (r *StoryRouterImpl) createBotCommand(userID int64, t string, chargeID string) {
+func (r *StoryRouterImpl) createInvoiceMessage(sub *models.Subscription) {
 	select {
 	case <-r.ctx.Done():
 		return
-	case r.chan_bot_cmd <- models.NewBotCommand(t, userID, chargeID):
+	case r.chan_bot_invoice <- models.NewInvoiceMessage(sub):
+	}
+}
+func (r *StoryRouterImpl) createPaymentMessage(pm models.PaymentData) {
+	select {
+	case <-r.ctx.Done():
+		return
+	case r.chan_outbound_payments <- pm:
 	}
 }
 func (r *StoryRouterImpl) cleanUserState(userID int64) {

@@ -87,23 +87,25 @@ func NewDailyLimit(userID int64, msgCount int, dailyLimit int) *DailyLimit {
 
 // Subscription представляет подписку
 type Subscription struct {
+	Payload       string    `json:"payload"`
 	ChargeId      string    `json:"charge_id"`
 	UserID        int64     `json:"user_id"`
 	Type          string    `json:"type"`
 	StartDate     time.Time `json:"start_date"`
 	EndDate       time.Time `json:"end_date"`
 	IsAutoRenewal bool      `json:"is_auto_renewal"`
-	Payload       string    `json:"payload"`
+	Status        string    `json:"status"`
+	Currency      string    `json:"currency"`
+	Price         int       `json:"price"`
 }
 
-func NewSubscription(chargeId string, userID int64, t string, endtime time.Time, payload string) *Subscription {
+func NewSubscription(userID int64, t string, payload string, status string, currency string, price int) *Subscription {
 	return &Subscription{
 		UserID:        userID,
 		Type:          t,
-		StartDate:     time.Now(),
-		EndDate:       endtime,
 		IsAutoRenewal: true,
-		ChargeId:      chargeId,
 		Payload:       payload,
+		Status:        status,
+		Price:         price,
 	}
 }
