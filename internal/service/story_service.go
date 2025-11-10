@@ -46,6 +46,10 @@ type StoryDatabase interface {
 	GetActiveSubscriptions(ctx context.Context, userID int64) ([]*models.Subscription, error)
 	GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error)
 	UpdatePendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error
+
+	GetAllSettings(ctx context.Context) (*models.Settings, error)
+	GetSetting(ctx context.Context, key string) (*models.Setting, error)
+	SetSetting(ctx context.Context, key string, value string, updatedby int64) error
 }
 type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
@@ -57,6 +61,9 @@ type StoryCache interface {
 	AddExceededLimit(ctx context.Context, userID int64) error
 	DeleteExceededLimit(ctx context.Context, userID int64) error
 	CheckExceededLimit(ctx context.Context, userID int64) (bool, error)
+
+	SetSetting(ctx context.Context, key, value string) error
+	GetAllSettings(ctx context.Context) (map[string]string, error)
 }
 type StoryServiceImpl struct {
 	priceBasicSubscription int
@@ -488,3 +495,97 @@ func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int
 	response := text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData)
 	return []string{response}, nil
 }
+
+// SetSetting изменяет значение настройки (только для админов)
+func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) error {
+	if key == "" {
+		return errors.New("key cannot be empty")
+	}
+
+	// Валидация значения в зависимости от ключа настройки
+	switch key {
+	case "sub.basic.price":
+		price, err := strconv.Atoi(value)
+		if err != nil || price <= 0 {
+			return errors.New("invalid price value: must be a positive number")
+		}
+
+	case "limit.day.base":
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 0 {
+			return errors.New("invalid base day limit: must be a non-negative number")
+		}
+	case "limit.day.adventure+":
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 0 {
+			return errors.New("invalid premium day limit: must be a non-negative number")
+		}
+	default:
+		return fmt.Errorf("unknown setting key: %s", key)
+	}
+
+	err := s.DBStory.SetSetting(ctx, key, value, updatedBy)
+	if err != nil {
+		return fmt.Errorf("failed to save setting: %w", err)
+	}
+
+	// Обновляем кэш — если кэш не обновился, считаем операцию неуспешной
+	if s.CStory != nil {
+		if err := s.CStory.SetSetting(ctx, key, value); err != nil {
+			s.Logger.ZapLogger.Error("Failed to update cache after setting change",
+				zap.Error(err), zap.String("key", key), zap.String("value", value))
+			return fmt.Errorf("failed to update cache: %w", err)
+		}
+	} else {
+		s.Logger.ZapLogger.Error("Cache client is nil, skipping cache update", zap.String("key", key))
+		return errors.New("cache client is not initialized")
+	}
+
+	s.Logger.ZapLogger.Info("Setting updated successfully",
+		zap.String("key", key),
+		zap.String("value", value),
+		zap.Int64("updatedBy", updatedBy))
+
+	return nil
+}
+
+// GetAllSettingsFromCache получает все настройки из кэша (Redis)
+func (s *StoryServiceImpl) GetAllSettingsFromCache(ctx context.Context) (map[string]string, error) {
+	place := "GetAllSettingsFromCache"
+	if s.CStory == nil {
+		s.Logger.ZapLogger.Warn("Cache client is nil", zap.Any("place", place))
+		return nil, errors.New("cache client is not initialized")
+	}
+	settings, err := s.CStory.GetAllSettings(ctx)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from cache",
+			zap.Error(err), zap.Any("place", place))
+		return nil, fmt.Errorf("failed to get settings from cache: %w", err)
+	}
+	s.Logger.ZapLogger.Info("Settings loaded from cache successfully",
+		zap.Any("count", len(settings)), zap.Any("place", place))
+	return settings, nil
+}
+
+// GetAllSettingsFromDB получает все настройки из базы данных (PostgreSQL)
+func (s *StoryServiceImpl) GetAllSettingsFromDB(ctx context.Context) (*models.Settings, error) {
+	place := "GetAllSettingsFromDB"
+	if s.DBStory == nil {
+		s.Logger.ZapLogger.Warn("Database client is nil", zap.Any("place", place))
+		return nil, errors.New("database client is not initialized")
+	}
+	settings, err := s.DBStory.GetAllSettings(ctx)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from database",
+			zap.Error(err), zap.Any("place", place))
+		return nil, fmt.Errorf("failed to get settings from database: %w", err)
+	}
+	if settings == nil {
+		s.Logger.ZapLogger.Warn("Settings from database is nil", zap.Any("place", place))
+		return nil, errors.New("settings from database is nil")
+	}
+	s.Logger.ZapLogger.Info("Settings loaded from database successfully",
+		zap.Any("count", len(settings.Settings)), zap.Any("place", place))
+	return settings, nil
+}
+

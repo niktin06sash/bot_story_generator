@@ -6,14 +6,20 @@ import (
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, userID int64, msgID int) IncommingMessage {
-	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID}
+func NewIncommingMessage(data string, userID int64, msgID int, agrs []Argument) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID, Arguments: agrs}
+}
+
+type Argument struct {
+	NameSetting string
+	ValueSetting  string
 }
 
 type IncommingMessage struct {
 	Data   string
 	UserID int64
 	MsgID  int
+	Arguments []Argument
 }
 
 func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {

@@ -110,3 +110,39 @@ func NewSubscription(userID int64, t string, payload string, status string, curr
 		Price:         price,
 	}
 }
+
+// Setting представляет запись из таблицы settings
+type Setting struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedBy int64     `json:"updated_by"`
+}
+
+// NewSetting создает новую настройку
+func NewSetting(key string, value string, updatedBy int64) *Setting {
+	return &Setting{
+		Key:   key,
+		Value: value,
+		UpdatedBy: updatedBy,
+	}
+}
+
+type Settings struct {
+	Settings []Setting `json:"settings"`
+}
+
+// начальные ключи настроек
+const (
+	SettingKeyPriceBasicSubscription = "sub.basic.price"
+	SettingKeyLimitBaseDay = "limit.day.base"
+	SettingKeyLimitPremiumDay = "limit.day.premium"
+)
+
+func NameSettingKeys() []string {
+	return []string{
+		SettingKeyPriceBasicSubscription,
+		SettingKeyLimitBaseDay,
+		SettingKeyLimitPremiumDay,
+	}
+}

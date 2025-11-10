@@ -84,6 +84,25 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Telegram Bot-connect")
 	defer bot.Stop()
+
+	// получение переменных настроек из базы и загрузка в кэш
+	ctx := bot.Ctx()
+	settings, err := storyDatabase.GetAllSettings(ctx)
+	if err != nil {
+		logger.ZapLogger.Debug("Failed to get settings from Database",
+			zap.Error(err),
+		)
+		return
+	}
+	err = storyCache.LoadCacheData(ctx, settings)
+	if err != nil {
+		logger.ZapLogger.Debug("Failed to load settings into Cache",
+			zap.Error(err),
+		)
+		return
+	}
+
+	//запуск бота
 	bot.StartBot()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)

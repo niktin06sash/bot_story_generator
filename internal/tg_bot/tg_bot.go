@@ -28,7 +28,7 @@ type Bot struct {
 }
 
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64, msgID int)
+	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument)
 	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string)
 	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData)
 	CloseInputChans()
@@ -143,7 +143,7 @@ func (bot *Bot) readIncommingMessage() {
 				msgID := update.CallbackQuery.Message.MessageID
 				//1 лог
 				bot.logger.ZapLogger.Info("Received CallbackQuery", zap.Any("userID", userID), zap.Any("data", data))
-				bot.router.AddComand(bot.ctx, data, userID, msgID)
+				bot.router.AddComand(bot.ctx, data, userID, msgID, nil)
 				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 			} else if update.Message != nil {
 				text := update.Message.Text
@@ -154,7 +154,38 @@ func (bot *Bot) readIncommingMessage() {
 					//1 лог
 					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text))
 					command := update.Message.Command()
-					bot.router.AddComand(bot.ctx, command, userID, msgID)
+
+					// parse arguments after command
+					var arguments []models.Argument
+					parts := strings.Fields(text)
+					if len(parts) > 1 {
+						// tokens after command
+						tokens := parts[1:]
+						// support formats:
+						// /cmd key=value
+						// /cmd key:value
+						// /cmd key value
+						if len(tokens) == 1 {
+							t := tokens[0]
+							if strings.Contains(t, "=") {
+								kv := strings.SplitN(t, "=", 2)
+								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
+							} else if strings.Contains(t, ":") {
+								kv := strings.SplitN(t, ":", 2)
+								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
+							} else {
+								// single token without separator — treat as key with empty value
+								arguments = append(arguments, models.Argument{NameSetting: t, ValueSetting: ""})
+							}
+						} else {
+							// first token is key, the rest is value (allows spaces in value)
+							key := tokens[0]
+							value := strings.Join(tokens[1:], " ")
+							arguments = append(arguments, models.Argument{NameSetting: key, ValueSetting: value})
+						}
+					}
+
+					bot.router.AddComand(bot.ctx, command, userID, msgID, arguments)
 				} else {
 					//обычные сообщения также игнорируются
 					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
@@ -533,4 +564,8 @@ func (bot *Bot) Stop() {
 	bot.wg.Wait()
 	bot.router.CloseInputChans()
 	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
+}
+
+func (bot *Bot) Ctx() context.Context {
+	return bot.ctx
 }

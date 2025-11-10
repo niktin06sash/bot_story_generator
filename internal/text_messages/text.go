@@ -3,6 +3,7 @@ package text_messages
 import (
 	"bot_story_generator/internal/models"
 	"fmt"
+	"sort"
 	"time"
 	// "strings"
 )
@@ -272,3 +273,86 @@ func CreateNoSubscriptionMessage() string {
 }
 
 var TextErrorGetSubscriptionStatus = `⚠️ Не удалось получить статус подписки.`
+
+func FormatSettingsComparison(cacheSettings map[string]string, dbSettings map[string]string) string {
+	var resp string
+
+	resp += Divider
+	resp += "⚙️ Текущие настройки системы\n"
+	resp += Divider
+
+	// Get all unique keys
+	keyMap := make(map[string]bool)
+	for key := range cacheSettings {
+		keyMap[key] = true
+	}
+	for key := range dbSettings {
+		keyMap[key] = true
+	}
+
+	// Sort keys for consistent output
+	var keys []string
+	for key := range keyMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Display each setting
+	for _, key := range keys {
+		cacheVal, cacheExists := cacheSettings[key]
+		dbVal, dbExists := dbSettings[key]
+
+		resp += fmt.Sprintf("🔹 %s\n", key)
+
+		if cacheExists && dbExists {
+			if cacheVal == dbVal {
+				resp += fmt.Sprintf("   ✅ Значение: %s\n", cacheVal)
+			} else {
+				resp += fmt.Sprintf("   ⚠️ Кеш: %s\n", cacheVal)
+				resp += fmt.Sprintf("   ⚠️ БД: %s\n", dbVal)
+				resp += "   🔴 РАССИНХРОНИЗАЦИЯ!\n"
+			}
+		} else if cacheExists {
+			resp += fmt.Sprintf("   ✅ Значение: %s (только в кеше)\n", cacheVal)
+		} else if dbExists {
+			resp += fmt.Sprintf("   ⚠️ Значение: %s (только в БД, не в кеше!)\n", dbVal)
+		} else {
+			resp += "   ❌ Нет данных\n"
+		}
+	}
+
+	resp += Divider
+
+	// Summary
+	var cacheOnly, dbOnly, mismatched int
+	for key := range keyMap {
+		cacheVal, cacheExists := cacheSettings[key]
+		dbVal, dbExists := dbSettings[key]
+
+		if cacheExists && !dbExists {
+			cacheOnly++
+		} else if !cacheExists && dbExists {
+			dbOnly++
+		} else if cacheExists && dbExists && cacheVal != dbVal {
+			mismatched++
+		}
+	}
+
+	resp += "📊 Статус синхронизации:\n"
+	if cacheOnly > 0 {
+		resp += fmt.Sprintf("   ⚠️ Только в кеше: %d\n", cacheOnly)
+	}
+	if dbOnly > 0 {
+		resp += fmt.Sprintf("   ⚠️ Только в БД: %d\n", dbOnly)
+	}
+	if mismatched > 0 {
+		resp += fmt.Sprintf("   🔴 Рассинхронизировано: %d\n", mismatched)
+	}
+	if cacheOnly == 0 && dbOnly == 0 && mismatched == 0 {
+		resp += "   ✅ Кеш синхронизирован с БД\n"
+	}
+
+	resp += Divider
+	return resp
+}
+

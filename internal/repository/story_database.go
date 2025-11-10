@@ -343,3 +343,61 @@ func (s *StoryDatabaseImpl) GetActiveSubscriptions(ctx context.Context, userID i
 	}
 	return subs, nil
 }
+
+// SETTINGS
+func (s *StoryDatabaseImpl) GetAllSettings(ctx context.Context) (*models.Settings, error) {
+	query := `
+		SELECT key, value, updated_at, updated_by
+		FROM settings
+	`
+	rows, err := s.databaseclient.Pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	defer rows.Close()
+
+	var res models.Settings
+	for rows.Next() {
+		var st models.Setting
+		if err := rows.Scan(&st.Key, &st.Value, &st.UpdatedAt, &st.UpdatedBy); err != nil {
+			return nil, fmt.Errorf("server: database error: %w", err)
+		}
+		res.Settings = append(res.Settings, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	return &res, nil
+}
+
+func (s *StoryDatabaseImpl) GetSetting(ctx context.Context, key string) (*models.Setting, error) {
+	query := `
+		SELECT key, value, updated_at, updated_by
+		FROM settings
+		WHERE key = $1
+	`
+	row := s.databaseclient.Pool.QueryRow(ctx, query, key)
+	st := &models.Setting{}
+	if err := row.Scan(&st.Key, &st.Value, &st.UpdatedAt, &st.UpdatedBy); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("server: database error: %w", err)
+	}
+	return st, nil
+}
+
+func (s *StoryDatabaseImpl) SetSetting(ctx context.Context, key string, value string, updatedby int64) error {
+	query := `
+		INSERT INTO settings (key, value, updated_at, updated_by)
+		VALUES ($1, $2, now(), $3)
+		ON CONFLICT (key) DO UPDATE
+		SET value = EXCLUDED.value,
+		    updated_at = now()
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query, key, value, updatedby)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}

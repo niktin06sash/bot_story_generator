@@ -45,3 +45,10 @@ func (r *StoryRouterImpl) cleanUserState(userID int64) {
 	delete(r.userState, userID)
 	r.mux.Unlock()
 }
+
+func (r *StoryRouterImpl) CheckAdmin(userID int64) bool {
+	r.mux.Lock()
+	_, ok := r.admins[userID]
+	r.mux.Unlock()
+	return ok
+}

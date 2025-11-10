@@ -22,6 +22,9 @@ type StoryService interface {
 	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 	CommitSubscription(ctx context.Context, pd *models.PaymentData) error
 	GetSubscriptionStatus(ctx context.Context, userID int64) ([]string, error)
+	SetSetting(ctx context.Context, key, value string, updatedBy int64) error
+	GetAllSettingsFromCache(ctx context.Context) (map[string]string, error)
+	GetAllSettingsFromDB(ctx context.Context) (*models.Settings, error)
 }
 
 type StoryRouterImpl struct {
@@ -261,11 +264,89 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.logger.ZapLogger.Info("User requested terms of service...", zap.Any("userID", userID))
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextTermsOfService)
 				r.cleanUserState(userID)
+
 			} else if data == "support" {
 				// Обработка запроса на поддержку
 				r.logger.ZapLogger.Info("User requested support...", zap.Any("userID", userID))
 				r.createOutboundMessage(r.ctx, userID, text_messages.TextSupportInfo)
 				r.cleanUserState(userID)
+
+			} else if data == "changeSetting" {
+				// Обработка изменения настроек администратором
+				if !r.CheckAdmin(userID) {
+					r.logger.ZapLogger.Warn("Unauthorized setting change attempt", zap.Any("userID", userID))
+					r.cleanUserState(userID)
+					continue
+				}
+
+				if len(msg.Arguments) == 0 {
+					r.logger.ZapLogger.Error("Missing setting arguments", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "Не указаны параметры настройки")
+					r.cleanUserState(userID)
+					continue
+				}
+
+				r.logger.ZapLogger.Info("Admin changing settings...", 
+					zap.Any("userID", userID),
+					zap.Any("setting", msg.Arguments[0].NameSetting),
+					zap.Any("value", msg.Arguments[0].ValueSetting))
+
+				err := r.service.SetSetting(r.ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID)
+				if err != nil {
+					r.logger.ZapLogger.Error("Failed to change setting",
+						zap.Error(err),
+						zap.Any("userID", userID),
+						zap.Any("setting", msg.Arguments[0].NameSetting))
+					r.createOutboundMessage(r.ctx, userID, "Ошибка при изменении настройки: " + err.Error())
+				} else {
+					r.createOutboundMessage(r.ctx, userID, "Настройка успешно изменена")
+				}
+				r.cleanUserState(userID)
+
+			} else if data == "viewSetting" {
+				// Обработка просмотра настроек администратором
+				if !r.CheckAdmin(userID) {
+					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID))
+					r.cleanUserState(userID)
+					continue
+				}
+
+				// Получить настройки из кеша
+				cacheSettings, errCache := r.service.GetAllSettingsFromCache(r.ctx)
+				if errCache != nil {
+					r.logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(errCache))
+					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных из кеша: "+errCache.Error())
+				}
+
+				// Получить настройки из БД
+				dbSettings, errDB := r.service.GetAllSettingsFromDB(r.ctx)
+				if errDB != nil {
+					r.logger.ZapLogger.Error("Failed to get settings from database", zap.Error(errDB))
+					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных из БД: "+errDB.Error())
+				}
+
+				// Если оба запроса неудачны, отправить ошибку
+				if errCache != nil && errDB != nil {
+					r.createOutboundMessage(r.ctx, userID, "❌ Не удалось получить настройки ни из кеша, ни из БД. Пожалуйста, попробуйте позже.")
+					r.cleanUserState(userID)
+					continue
+				}
+
+				// Преобразовать настройки из БД в map для сравнения
+				dbSettingsMap := make(map[string]string)
+				if dbSettings != nil && dbSettings.Settings != nil {
+					for _, setting := range dbSettings.Settings {
+						dbSettingsMap[setting.Key] = setting.Value
+					}
+				}
+
+				// Отправить сформатированное сравнение
+				formattedMessage := text_messages.FormatSettingsComparison(cacheSettings, dbSettingsMap)
+				r.createOutboundMessage(r.ctx, userID, formattedMessage)
+
+				r.logger.ZapLogger.Info("Admin viewed settings", zap.Any("userID", userID))
+				r.cleanUserState(userID)
+
 			} else {
 				//2 лог
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
@@ -273,21 +354,19 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.cleanUserState(userID)
 			}
 
-			// TODO проверить подписку
-
 			// TODO посмотреть все истории
 
 		}
 	}
 }
 
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument) {
 	select {
 	case <-r.ctx.Done():
 		return
 	case <-ctx.Done():
 		return
-	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID):
+	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID, arguments):
 	}
 }
 func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string) {
