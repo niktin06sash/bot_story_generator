@@ -33,7 +33,7 @@ func (r *StoryRouterImpl) createInvoiceMessage(sub *models.Subscription) {
 	case r.chan_bot_invoice <- models.NewInvoiceMessage(sub):
 	}
 }
-func (r *StoryRouterImpl) createPaymentMessage(pm models.PaymentData) {
+func (r *StoryRouterImpl) createPaymentMessage(pm *models.PaymentData) {
 	select {
 	case <-r.ctx.Done():
 		return

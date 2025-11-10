@@ -55,6 +55,7 @@ type StoryCache interface {
 	AddCreatedUser(ctx context.Context, userID int64) error
 	CheckCreatedUser(ctx context.Context, userID int64) (bool, error)
 	AddExceededLimit(ctx context.Context, userID int64) error
+	DeleteExceededLimit(ctx context.Context, userID int64) error
 	CheckExceededLimit(ctx context.Context, userID int64) (bool, error)
 }
 type StoryServiceImpl struct {
@@ -176,6 +177,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("Invalid user choice", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	//TODO проверка на активную подписку
 	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
 	limit, err := s.checkDailyLimits(ctx, userID, place)
 	if err != nil {
@@ -376,7 +378,7 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	return []string{text_messages.TextSuccessStopStory}, nil
 }
 
-func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd models.PaymentData) error {
+func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
 	place := "ValidatePreCheckout"
 	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, pd.UserID)
 	if err != nil {
@@ -393,6 +395,7 @@ func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd models.Pa
 	}
 	sub, err := s.DBStory.GetPendingSubscription(ctx, pd.InvoicePayload, pd.UserID)
 	if err != nil {
+		//TODO В отдельном потоке сделать update состояния транзакции на reject
 		if strings.HasPrefix(err.Error(), "client: ") {
 			//сообщение об отсутствии данных pending sub
 			s.Logger.ZapLogger.Warn("GetPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
@@ -403,6 +406,7 @@ func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd models.Pa
 	}
 	if sub.Currency != pd.Currency || sub.Price != pd.TotalAmount {
 		//сообщение о некорректых данных при оплате
+		//TODO В отдельном потоке сделать update состояния транзакции на reject
 		return errors.New(text_messages.InvalidPaymentData)
 	}
 	return nil
@@ -445,13 +449,18 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 	s.Logger.ZapLogger.Info("Subscription pending successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return sub, nil
 }
-func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd models.PaymentData) error {
-	//TODO добавить логику для изменения дневного лимита
+func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
 	place := "CommitSubscription"
+	err := s.CStory.DeleteExceededLimit(ctx, pd.UserID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("DeleteExceededLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorActivateSubscription)
+	}
+	//TODO добавить логику для изменения дневного лимита текущей даты
 	start := time.Now()
 	// Подписка на 30 дней
 	end := start.AddDate(0, 0, 30)
-	err := s.DBStory.UpdatePendingSubscription(ctx, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
+	err = s.DBStory.UpdatePendingSubscription(ctx, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
@@ -459,24 +468,23 @@ func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd models.Pay
 	return nil
 }
 
-func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
+func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) ([]string, error) {
 	place := "GetSubscriptionStatus"
 	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return "", errors.New(text_messages.TextErrorProcessPayment)
+		return nil, errors.New(text_messages.TextErrorGetSubscriptionStatus)
 	}
 	if len(subscriptions) > 1 {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", userID), zap.Any("place", place))
-		return "", errors.New(text_messages.TextErrorProcessPayment)
+		return nil, errors.New(text_messages.TextErrorGetSubscriptionStatus)
 	}
 	if len(subscriptions) == 0 {
-		response := text_messages.CreateNoSubscriptionMessage()
-		return response, nil
+		return []string{text_messages.CreateNoSubscriptionMessage()}, nil
 	}
 
 	sub := subscriptions[0]
 	typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
 	response := text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData)
-	return response, nil
+	return []string{response}, nil
 }

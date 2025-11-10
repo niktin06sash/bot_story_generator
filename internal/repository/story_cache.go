@@ -30,6 +30,14 @@ func (s *StoryCacheImpl) CheckExceededLimit(ctx context.Context, userID int64) (
 	}
 	return exists == 1, nil
 }
+func (s *StoryCacheImpl) DeleteExceededLimit(ctx context.Context, userID int64) error {
+	key := fmt.Sprintf(s.cacheclient.ExceededLimitKey, userID)
+	_, err := s.cacheclient.Connect.Del(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	return err
+}
 
 // в дальнейшем можно будет хранить типо профиля или что-то такое, пока просто флаг присутствия после регистрации
 // пусть сутки хранятся значения

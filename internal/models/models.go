@@ -130,8 +130,8 @@ type PaymentData struct {
 }
 
 // NewPaymentData создает новые данные платежа
-func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount int, userid int64, chargeId string) PaymentData {
-	return PaymentData{
+func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount int, userid int64, chargeId string) *PaymentData {
+	return &PaymentData{
 		QueryID:        queryID,
 		Currency:       currency,
 		InvoicePayload: invoicePayload,

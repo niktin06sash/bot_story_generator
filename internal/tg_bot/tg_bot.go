@@ -15,20 +15,22 @@ import (
 )
 
 type Bot struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	updatesChan tgbotapi.UpdatesChannel
-	api         *tgbotapi.BotAPI
-	logger      *logger.Logger
-	router      StoryRouter
-	wg          *sync.WaitGroup
-	numworkers  int
+	ctx           context.Context
+	cancel        context.CancelFunc
+	updatesChan   tgbotapi.UpdatesChannel
+	api           *tgbotapi.BotAPI
+	logger        *logger.Logger
+	router        StoryRouter
+	wg            *sync.WaitGroup
+	numworkers    int
+	payload_msgId map[string]int
+	mux           *sync.Mutex
 }
 
 type StoryRouter interface {
 	AddComand(ctx context.Context, data string, userID int64, msgID int)
 	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string)
-	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan models.PaymentData)
+	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData)
 	CloseInputChans()
 }
 
@@ -50,14 +52,16 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 	updates := bot.GetUpdatesChan(u)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Bot{
-		ctx:         ctx,
-		cancel:      cancel,
-		api:         bot,
-		logger:      logger,
-		updatesChan: updates,
-		router:      router,
-		wg:          &sync.WaitGroup{},
-		numworkers:  cfg.Setting.NumWorkers,
+		ctx:           ctx,
+		cancel:        cancel,
+		api:           bot,
+		logger:        logger,
+		updatesChan:   updates,
+		router:        router,
+		wg:            &sync.WaitGroup{},
+		numworkers:    cfg.Setting.NumWorkers,
+		payload_msgId: make(map[string]int),
+		mux:           &sync.Mutex{},
 	}, nil
 }
 
@@ -250,7 +254,24 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 		}
 	}
 }
-func (bot *Bot) sendPaymentData(ch chan models.PaymentData) {
+func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string) int {
+	bot.mux.Lock()
+	msgId, ok := bot.payload_msgId[payload]
+	if !ok {
+		bot.mux.Unlock()
+		//если в мапе нет ключа по payload - делаем запрос на ошибку checkoutQuery с единым ответом ошибки
+		bot.logger.ZapLogger.Error("Invoice's messageID for payload not found", zap.Any("userID", userID), zap.String("payload", payload))
+		_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": queryId, "ok": "false", "error_message": text_messages.TextErrorProcessPayment})
+		if err != nil {
+			bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", payload))
+		}
+		return 0
+	}
+	delete(bot.payload_msgId, payload)
+	bot.mux.Unlock()
+	return msgId
+}
+func (bot *Bot) sendPaymentData(ch chan *models.PaymentData) {
 	for {
 		select {
 		case <-bot.ctx.Done():
@@ -261,16 +282,36 @@ func (bot *Bot) sendPaymentData(ch chan models.PaymentData) {
 				return
 			}
 			if data.Error != nil && data.ChargeID == "" && data.QueryID != "" {
+				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID)
+				if msgId == 0 {
+					continue
+				}
 				bot.logger.ZapLogger.Warn("Invalid payment data", zap.Any("queryID", data.QueryID), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				//если в мапе есть ключ по payload - делаем запрос на ошибку checkoutQuery которая произошла в сервисе
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "false", "error_message": data.Error.Error()})
 				if err != nil {
 					bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 				}
-				continue
+				//удаляем invoice сообщение
+				del := tgbotapi.NewDeleteMessage(data.UserID, msgId)
+				_, err = bot.api.Request(del)
+				if err != nil {
+					bot.logger.ZapLogger.Error("Failed to delete invoice message", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				}
 			} else if data.Error == nil && data.ChargeID == "" && data.QueryID != "" {
+				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID)
+				if msgId == 0 {
+					continue
+				}
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "true"})
 				if err != nil {
 					bot.logger.ZapLogger.Error("Failed to answer pre-checkout query", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				}
+				//удаляем invoice сообщение
+				del := tgbotapi.NewDeleteMessage(data.UserID, msgId)
+				_, err = bot.api.Request(del)
+				if err != nil {
+					bot.logger.ZapLogger.Error("Failed to delete invoice message", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 					continue
 				}
 				bot.logger.ZapLogger.Info("Pre-checkout query answered successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
@@ -475,13 +516,16 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 
 	// Предлагаем чаевые при оплате подписки, но для XTR их нет, но строку надо оставить, иначе ошибка
 	invoice.SuggestedTipAmounts = []int{}
-
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
 		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID))
 	} else {
 		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID))
+		bot.mux.Lock()
+		bot.payload_msgId[sub.Payload] = msg.MessageID
+		bot.mux.Unlock()
 	}
+
 }
 
 func (bot *Bot) Stop() {

@@ -18,10 +18,10 @@ type StoryService interface {
 	CreateUser(ctx context.Context, userID int64) ([]string, error)
 	StopStory(ctx context.Context, userID int64) ([]string, error)
 	StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error)
-	ValidatePreCheckout(ctx context.Context, pd models.PaymentData) error
+	ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error
 	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
-	CommitSubscription(ctx context.Context, pd models.PaymentData) error
-	GetSubscriptionStatus(ctx context.Context, userID int64) (string, error)
+	CommitSubscription(ctx context.Context, pd *models.PaymentData) error
+	GetSubscriptionStatus(ctx context.Context, userID int64) ([]string, error)
 }
 
 type StoryRouterImpl struct {
@@ -29,12 +29,12 @@ type StoryRouterImpl struct {
 	cancel                 context.CancelFunc
 	service                StoryService
 	chan_command           chan models.IncommingMessage
-	chan_outbound_payments chan models.PaymentData
+	chan_outbound_payments chan *models.PaymentData
 	chan_outbound          chan models.OutboundMessage
 	chan_edit              chan models.EditMessage
 	chan_delete            chan models.DeleteMessage
 	chan_bot_invoice       chan models.InvoiceMessage
-	chan_payments          chan models.PaymentData
+	chan_payments          chan *models.PaymentData
 	logger                 *logger.Logger
 	userState              map[int64]struct{}
 	admins                 map[int64]struct{}
@@ -50,8 +50,8 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 		cancel:                 cancel,
 		service:                service,
 		chan_command:           make(chan models.IncommingMessage, 1000),
-		chan_outbound_payments: make(chan models.PaymentData, 1000),
-		chan_payments:          make(chan models.PaymentData, 1000),
+		chan_outbound_payments: make(chan *models.PaymentData, 1000),
+		chan_payments:          make(chan *models.PaymentData, 1000),
 		chan_outbound:          make(chan models.OutboundMessage, 1000),
 		chan_edit:              make(chan models.EditMessage, 1000),
 		chan_delete:            make(chan models.DeleteMessage, 1000),
@@ -247,12 +247,13 @@ func (r *StoryRouterImpl) routerWorker() {
 			} else if data == "subscription" {
 				//2 лог
 				r.logger.ZapLogger.Info("Checking subscription status...", zap.Any("userID", userID))
-				status, err := r.service.GetSubscriptionStatus(r.ctx, userID)
+				resp, err := r.service.GetSubscriptionStatus(r.ctx, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorGetSubscriptionStatus)
-				} else {
-					r.createOutboundMessage(r.ctx, userID, status)
+					r.createOutboundMessage(r.ctx, userID, err.Error())
+					r.cleanUserState(userID)
+					continue
 				}
+				r.createOutboundMessage(r.ctx, userID, resp[0])
 				r.cleanUserState(userID)
 
 			} else if data == "terms" {
@@ -298,7 +299,7 @@ func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, pay
 	case r.chan_payments <- models.NewPaymentData(queryId, currency, payload, amount, userID, chargeID):
 	}
 }
-func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan models.PaymentData) {
+func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData) {
 	return r.chan_outbound, r.chan_edit, r.chan_delete, r.chan_bot_invoice, r.chan_outbound_payments
 }
 
