@@ -21,7 +21,7 @@ import (
 func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
-		//если конфига нет - смерть
+		//☠☠☠ если конфига нет - смерть ☠☠☠
 		panic(fmt.Sprintf("Failed to load config: %v", err))
 	}
 	logger, err := logger.NewLogger(cfg)

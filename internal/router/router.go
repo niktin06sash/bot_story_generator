@@ -21,6 +21,7 @@ type StoryService interface {
 	ValidatePreCheckout(ctx context.Context, pd models.PaymentData) error
 	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 	CommitSubscription(ctx context.Context, pd models.PaymentData) error
+	GetSubscriptionStatus(ctx context.Context, userID int64) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -66,7 +67,8 @@ func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) 
 	return routerImpl
 }
 func (r *StoryRouterImpl) StartRouter() {
-	r.wg.Add(r.numworkers)
+	totalWorkers := r.numworkers * 2 // Учитываем routerWorker и paymentWorker
+	r.wg.Add(totalWorkers)
 	for i := 0; i < r.numworkers; i++ {
 		go func() {
 			defer r.wg.Done()
@@ -240,6 +242,17 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.createInvoiceMessage(sub)
+				r.cleanUserState(userID)
+
+			} else if data == "subscription" {
+				//2 лог
+				r.logger.ZapLogger.Info("Checking subscription status...", zap.Any("userID", userID))
+				status, err := r.service.GetSubscriptionStatus(r.ctx, userID)
+				if err != nil {
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextErrorGetSubscriptionStatus)
+				} else {
+					r.createOutboundMessage(r.ctx, userID, status)
+				}
 				r.cleanUserState(userID)
 
 			} else if data == "terms" {

@@ -59,10 +59,8 @@ type StoryCache interface {
 }
 type StoryServiceImpl struct {
 	priceBasicSubscription int
-	currencySubscription   string
 	baseDayLimit           int
 	premiumDayLimit        int
-	nameSub                string
 
 	DBStory StoryDatabase
 	AIStory StoryAI
@@ -72,11 +70,15 @@ type StoryServiceImpl struct {
 
 // TODO в конфиге добавь недостающие данные
 func NewStoryService(cfg *config.Config, db StoryDatabase, ai StoryAI, cache StoryCache, logger *logger.Logger) *StoryServiceImpl {
-	return &StoryServiceImpl{priceBasicSubscription: cfg.Setting.PriceBasicSubscription, currencySubscription: cfg.Setting.Currency,
-		baseDayLimit:    cfg.Setting.TokenDayLimit,
-		premiumDayLimit: cfg.Setting.PremiumTokenDayLimit,
-		nameSub:         cfg.Setting.NameBasicSubscription,
-		DBStory:         db, AIStory: ai, CStory: cache, Logger: logger}
+	return &StoryServiceImpl{
+		priceBasicSubscription: cfg.Setting.PriceBasicSubscription,
+		baseDayLimit:           cfg.Setting.TokenDayLimit,
+		premiumDayLimit:        cfg.Setting.PremiumTokenDayLimit,
+		DBStory:                db,
+		AIStory:                ai,
+		CStory:                 cache,
+		Logger:                 logger,
+	}
 }
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
@@ -110,7 +112,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	}
 	//TODO в юзер чойз че то подобное сделай
 	if len(fantasyCharacters.Characters) == 0 {
-		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(errors.New("Empty response from AI")), zap.Any("userID", userID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(errors.New("empty response from AI")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	data, err := json.Marshal(fantasyCharacters)
@@ -424,8 +426,17 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 		return nil, errors.New(text_messages.TextAlreadyActiveSubscription)
 	}
 	status := "pending"
-	payload := fmt.Sprintf("%s_%s_%d_%d", s.nameSub, s.currencySubscription, userID, time.Now().Unix())
-	sub := models.NewSubscription(userID, s.nameSub, payload, status, s.currencySubscription, s.priceBasicSubscription)
+
+	// Есил будем добавлять другие типы подписок, то тут нужно будет менять currency и price в зависимости от типа
+	// Например, можно будет передавать тип подписки в аргументах функции
+	// и в зависимости от этого выбирать нужные параметры
+	// Но пока у нас только один тип подписки, поэтому оставляем так
+	currencySubscription := "XTR"
+
+	nameSub := text_messages.NameBasicSubscription
+
+	payload := fmt.Sprintf("%s_%s_%d_%d", nameSub, currencySubscription, userID, time.Now().Unix())
+	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, s.priceBasicSubscription)
 	err = s.DBStory.AddSubscription(ctx, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
@@ -438,11 +449,34 @@ func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd models.Pay
 	//TODO добавить логику для изменения дневного лимита
 	place := "CommitSubscription"
 	start := time.Now()
-	end := time.Now().AddDate(0, 0, s.premiumDayLimit)
+	// Подписка на 30 дней
+	end := start.AddDate(0, 0, 30)
 	err := s.DBStory.UpdatePendingSubscription(ctx, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
 	return nil
+}
+
+func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
+	place := "GetSubscriptionStatus"
+	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorProcessPayment)
+	}
+	if len(subscriptions) > 1 {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorProcessPayment)
+	}
+	if len(subscriptions) == 0 {
+		response := text_messages.CreateNoSubscriptionMessage()
+		return response, nil
+	}
+
+	sub := subscriptions[0]
+	typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
+	response := text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData)
+	return response, nil
 }

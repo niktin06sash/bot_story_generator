@@ -439,7 +439,7 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 // * Функция отправки инвойса с подпиской
 func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 	name := text_messages.NameBasicSubscription
-	description := text_messages.DescriptionBasicSubsription
+	description := text_messages.DescriptionBasicSubscription
 	var provideToken string
 	var startParameter string
 	if sub.Currency == "XTR" {
@@ -449,6 +449,15 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 		provideToken = ""
 		startParameter = ""
 	}
+	// Диагностика: логируем сумму и userID
+	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Int("amount", sub.Price), zap.Int64("userID", sub.UserID), zap.String("currency", sub.Currency))
+
+	if sub.Price <= 0 {
+		bot.logger.ZapLogger.Warn("Subscription price is zero or negative, aborting invoice send", zap.Int("amount", sub.Price), zap.Int64("userID", sub.UserID))
+		_, _ = bot.api.Send(tgbotapi.NewMessage(sub.UserID, "Ошибка: сумма подписки не настроена. Пожалуйста, свяжитесь с поддержкой."))
+		return
+	}
+
 	prices := []tgbotapi.LabeledPrice{
 		{Label: description, Amount: sub.Price},
 	}

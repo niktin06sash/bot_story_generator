@@ -106,6 +106,7 @@ func NewSubscription(userID int64, t string, payload string, status string, curr
 		IsAutoRenewal: true,
 		Payload:       payload,
 		Status:        status,
+		Currency:      currency,
 		Price:         price,
 	}
 }

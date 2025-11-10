@@ -246,17 +246,20 @@ func (s *StoryDatabaseImpl) GetAllStorySegments(ctx context.Context, storyID int
 // AddSubscription добавляет новую подписку для пользователя
 func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
 	query := `
-		INSERT INTO subscriptions (userID, type, isAutoRenewal, payload, currency, price, status)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO subscriptions (payload, chargeId, userID, type, status, startDate, endDate, isAutoRenewal, currency, price)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := s.databaseclient.Pool.Exec(ctx, query,
+		subscription.Payload,
+		subscription.ChargeId,
 		subscription.UserID,
 		subscription.Type,
+		subscription.Status,
+		subscription.StartDate,
+		subscription.EndDate,
 		subscription.IsAutoRenewal,
-		subscription.Payload,
 		subscription.Currency,
 		subscription.Price,
-		subscription.Status,
 	)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
@@ -265,13 +268,24 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 }
 func (s *StoryDatabaseImpl) GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error) {
 	query := `
-		SELECT userID, type, isAutoRenewal, payload, currency, price, status
+		SELECT payload, chargeId, userID, type, status, startDate, endDate, isAutoRenewal, currency, price
 		FROM subscriptions 
         WHERE userID = $1 AND payload = $2 AND status = 'pending'
 	`
 	row := s.databaseclient.Pool.QueryRow(ctx, query, userID, payload)
 	sub := &models.Subscription{}
-	err := row.Scan(&sub.UserID, &sub.Type, &sub.IsAutoRenewal, &sub.Payload, &sub.Currency, &sub.Price, &sub.Status)
+	err := row.Scan(
+		&sub.Payload,
+		&sub.ChargeId,
+		&sub.UserID,
+		&sub.Type,
+		&sub.Status,
+		&sub.StartDate,
+		&sub.EndDate,
+		&sub.IsAutoRenewal,
+		&sub.Currency,
+		&sub.Price,
+	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("client: undefined payload")
