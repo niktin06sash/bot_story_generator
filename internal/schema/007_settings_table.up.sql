@@ -4,4 +4,3 @@ CREATE TABLE settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
     updated_by BIGINT NOT NULL
 );
-CREATE INDEX idx_settings_key ON settings (key);

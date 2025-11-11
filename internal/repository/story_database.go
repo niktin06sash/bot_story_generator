@@ -345,7 +345,7 @@ func (s *StoryDatabaseImpl) GetActiveSubscriptions(ctx context.Context, userID i
 }
 
 // SETTINGS
-func (s *StoryDatabaseImpl) GetAllSettings(ctx context.Context) (*models.Settings, error) {
+func (s *StoryDatabaseImpl) GetAllSettings(ctx context.Context) ([]*models.Setting, error) {
 	query := `
 		SELECT key, value, updated_at, updated_by
 		FROM settings
@@ -356,18 +356,18 @@ func (s *StoryDatabaseImpl) GetAllSettings(ctx context.Context) (*models.Setting
 	}
 	defer rows.Close()
 
-	var res models.Settings
+	var res []*models.Setting
 	for rows.Next() {
 		var st models.Setting
 		if err := rows.Scan(&st.Key, &st.Value, &st.UpdatedAt, &st.UpdatedBy); err != nil {
 			return nil, fmt.Errorf("server: database error: %w", err)
 		}
-		res.Settings = append(res.Settings, st)
+		res = append(res, &st)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
-	return &res, nil
+	return res, nil
 }
 
 func (s *StoryDatabaseImpl) GetSetting(ctx context.Context, key string) (*models.Setting, error) {
@@ -392,8 +392,9 @@ func (s *StoryDatabaseImpl) SetSetting(ctx context.Context, key string, value st
 		INSERT INTO settings (key, value, updated_at, updated_by)
 		VALUES ($1, $2, now(), $3)
 		ON CONFLICT (key) DO UPDATE
-		SET value = EXCLUDED.value,
-		    updated_at = now()
+		SET value = $2,
+			updated_at = now(),
+			updated_by = $3
 	`
 	_, err := s.databaseclient.Pool.Exec(ctx, query, key, value, updatedby)
 	if err != nil {

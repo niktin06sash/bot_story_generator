@@ -128,10 +128,6 @@ func NewSetting(key string, value string, updatedBy int64) *Setting {
 	}
 }
 
-type Settings struct {
-	Settings []Setting `json:"settings"`
-}
-
 // начальные ключи настроек
 const (
 	SettingKeyPriceBasicSubscription = "sub.basic.price"

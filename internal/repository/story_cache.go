@@ -58,13 +58,13 @@ func (s *StoryCacheImpl) CheckCreatedUser(ctx context.Context, userID int64) (bo
 }
 
 // загрузка конфигурации кэша из бд
-func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings *models.Settings) error {
+func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings []*models.Setting) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}
 	allName := models.NameSettingKeys()
 	// Записываем каждую настройку в Redis с ключом settings:<key>
-	for _, st := range settings.Settings {
+	for _, st := range settings {
 		key := fmt.Sprintf("settings:%s", st.Key)
 		// Сохраняем значение как строку без TTL (пока)
 		err := s.cacheclient.Connect.Set(ctx, key, st.Value, 0).Err()

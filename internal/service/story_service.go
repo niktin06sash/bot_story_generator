@@ -47,7 +47,7 @@ type StoryDatabase interface {
 	GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error)
 	UpdatePendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error
 
-	GetAllSettings(ctx context.Context) (*models.Settings, error)
+	GetAllSettings(ctx context.Context) ([]*models.Setting, error)
 	GetSetting(ctx context.Context, key string) (*models.Setting, error)
 	SetSetting(ctx context.Context, key string, value string, updatedby int64) error
 }
@@ -64,6 +64,7 @@ type StoryCache interface {
 
 	SetSetting(ctx context.Context, key, value string) error
 	GetAllSettings(ctx context.Context) (map[string]string, error)
+	LoadCacheData(ctx context.Context, settings []*models.Setting) error
 }
 type StoryServiceImpl struct {
 	priceBasicSubscription int
@@ -568,7 +569,7 @@ func (s *StoryServiceImpl) GetAllSettingsFromCache(ctx context.Context) (map[str
 }
 
 // GetAllSettingsFromDB получает все настройки из базы данных (PostgreSQL)
-func (s *StoryServiceImpl) GetAllSettingsFromDB(ctx context.Context) (*models.Settings, error) {
+func (s *StoryServiceImpl) GetAllSettingsFromDB(ctx context.Context) ([]*models.Setting, error) {
 	place := "GetAllSettingsFromDB"
 	if s.DBStory == nil {
 		s.Logger.ZapLogger.Warn("Database client is nil", zap.Any("place", place))
@@ -585,7 +586,58 @@ func (s *StoryServiceImpl) GetAllSettingsFromDB(ctx context.Context) (*models.Se
 		return nil, errors.New("settings from database is nil")
 	}
 	s.Logger.ZapLogger.Info("Settings loaded from database successfully",
-		zap.Any("count", len(settings.Settings)), zap.Any("place", place))
+		zap.Any("count", len(settings)), zap.Any("place", place))
 	return settings, nil
 }
 
+func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
+	// Получить настройки из кеша
+	cacheSettings, errCache := s.GetAllSettingsFromCache(ctx)
+	if errCache != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(errCache))
+		return "⚠️ Ошибка при получении данных из кеша: "+errCache.Error(), errCache
+	}
+
+	// Получить настройки из БД
+	dbSettings, errDB := s.GetAllSettingsFromDB(ctx)
+	if errDB != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from database", zap.Error(errDB))
+		return "⚠️ Ошибка при получении данных из БД: "+errDB.Error(), errDB
+	}
+
+	// Если оба запроса неудачны, вернуть ошибку
+	if errCache != nil && errDB != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from both cache and database", zap.Error(errCache), zap.Error(errDB))
+		return "", fmt.Errorf("ошибка при получении данных из кеша: %v; ошибка при получении данных из БД: %v", errCache, errDB)
+	}
+
+	// Преобразовать настройки из БД в map для сравнения
+	dbSettingsMap := make(map[string]string)
+	if dbSettings != nil {
+		for _, setting := range dbSettings {
+			dbSettingsMap[setting.Key] = setting.Value
+		}
+	}
+
+	// Отправить сформатированное сравнение
+	formattedMessage := text_messages.FormatSettingsComparison(cacheSettings, dbSettingsMap)
+	return formattedMessage, nil
+}
+
+func (s *StoryServiceImpl) RebootCacheData(ctx context.Context) error {
+	settings, err := s.DBStory.GetAllSettings(ctx)
+	if err != nil {
+		s.Logger.ZapLogger.Debug("Failed to get settings from Database",
+			zap.Error(err),
+		)
+		return err
+	}
+	err = s.CStory.LoadCacheData(ctx, settings)
+	if err != nil {
+		s.Logger.ZapLogger.Debug("Failed to load settings into Cache",
+			zap.Error(err),
+		)
+		return err
+	}
+	return nil
+}

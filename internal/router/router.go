@@ -24,7 +24,9 @@ type StoryService interface {
 	GetSubscriptionStatus(ctx context.Context, userID int64) ([]string, error)
 	SetSetting(ctx context.Context, key, value string, updatedBy int64) error
 	GetAllSettingsFromCache(ctx context.Context) (map[string]string, error)
-	GetAllSettingsFromDB(ctx context.Context) (*models.Settings, error)
+	GetAllSettingsFromDB(ctx context.Context) ([]*models.Setting, error)
+	ViewSetting(ctx context.Context) (string, error)
+	RebootCacheData(ctx context.Context) error
 }
 
 type StoryRouterImpl struct {
@@ -275,6 +277,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				// Обработка изменения настроек администратором
 				if !r.CheckAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting change attempt", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
@@ -307,46 +310,43 @@ func (r *StoryRouterImpl) routerWorker() {
 				// Обработка просмотра настроек администратором
 				if !r.CheckAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 
-				// Получить настройки из кеша
-				cacheSettings, errCache := r.service.GetAllSettingsFromCache(r.ctx)
-				if errCache != nil {
-					r.logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(errCache))
-					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных из кеша: "+errCache.Error())
-				}
-
-				// Получить настройки из БД
-				dbSettings, errDB := r.service.GetAllSettingsFromDB(r.ctx)
-				if errDB != nil {
-					r.logger.ZapLogger.Error("Failed to get settings from database", zap.Error(errDB))
-					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных из БД: "+errDB.Error())
-				}
-
-				// Если оба запроса неудачны, отправить ошибку
-				if errCache != nil && errDB != nil {
-					r.createOutboundMessage(r.ctx, userID, "❌ Не удалось получить настройки ни из кеша, ни из БД. Пожалуйста, попробуйте позже.")
+				r.logger.ZapLogger.Info("Admin viewing settings...", zap.Any("userID", userID))
+				formattedMessage, err := r.service.ViewSetting(r.ctx)
+				if err != nil {
+					r.logger.ZapLogger.Error("Failed to view settings", zap.Error(err), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных: "+err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-
-				// Преобразовать настройки из БД в map для сравнения
-				dbSettingsMap := make(map[string]string)
-				if dbSettings != nil && dbSettings.Settings != nil {
-					for _, setting := range dbSettings.Settings {
-						dbSettingsMap[setting.Key] = setting.Value
-					}
-				}
-
-				// Отправить сформатированное сравнение
-				formattedMessage := text_messages.FormatSettingsComparison(cacheSettings, dbSettingsMap)
 				r.createOutboundMessage(r.ctx, userID, formattedMessage)
 
 				r.logger.ZapLogger.Info("Admin viewed settings", zap.Any("userID", userID))
 				r.cleanUserState(userID)
-
+			
+			} else if data == "rebootCache" {
+				// Обработка просмотра настроек администратором
+				if !r.CheckAdmin(userID) {
+					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
+					r.cleanUserState(userID)
+					continue
+				}
+				
+				err := r.service.RebootCacheData(r.ctx)
+				if err != nil {
+					r.logger.ZapLogger.Error("Failed to reboot cache", zap.Error(err), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при перезагрузке кэша: "+err.Error())
+					r.cleanUserState(userID)
+					continue
+				}
+				r.createOutboundMessage(r.ctx, userID, "Кэш успешно перезагружен")
+				r.cleanUserState(userID)
+				
 			} else {
 				//2 лог
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
