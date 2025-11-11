@@ -49,7 +49,7 @@ type StoryDatabase interface {
 
 	GetAllSettings(ctx context.Context) ([]*models.Setting, error)
 	GetSetting(ctx context.Context, key string) (*models.Setting, error)
-	SetSetting(ctx context.Context, key string, value string, updatedby int64) error
+	SetSetting(ctx context.Context,  tx pgx.Tx, key string, value string, updatedby int64) error
 }
 type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
@@ -525,21 +525,47 @@ func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value str
 		return fmt.Errorf("unknown setting key: %s", key)
 	}
 
-	err := s.DBStory.SetSetting(ctx, key, value, updatedBy)
+	// Создаем транзакцию
+	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("place", "SetSetting"))
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+
+	// Сохраняем настройку в БД в рамках транзакции
+	err = s.DBStory.SetSetting(ctx, tx, key, value, updatedBy)
+	if err != nil {
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
+		}
 		return fmt.Errorf("failed to save setting: %w", err)
 	}
 
-	// Обновляем кэш — если кэш не обновился, считаем операцию неуспешной
+	// Коммитим транзакцию, только если кэш успешно обновился
 	if s.CStory != nil {
 		if err := s.CStory.SetSetting(ctx, key, value); err != nil {
 			s.Logger.ZapLogger.Error("Failed to update cache after setting change",
 				zap.Error(err), zap.String("key", key), zap.String("value", value))
+			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+			if rollbackErr != nil {
+				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
+			}
 			return fmt.Errorf("failed to update cache: %w", err)
 		}
 	} else {
 		s.Logger.ZapLogger.Error("Cache client is nil, skipping cache update", zap.String("key", key))
+		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
+		}
 		return errors.New("cache client is not initialized")
+	}
+
+	// Подтверждаем транзакцию
+	if err := s.DBStory.CommitTx(ctx, tx); err != nil {
+		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.String("key", key))
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.Logger.ZapLogger.Info("Setting updated successfully",
@@ -605,18 +631,13 @@ func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 		return "⚠️ Ошибка при получении данных из БД: "+errDB.Error(), errDB
 	}
 
-	// Если оба запроса неудачны, вернуть ошибку
-	if errCache != nil && errDB != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from both cache and database", zap.Error(errCache), zap.Error(errDB))
-		return "", fmt.Errorf("ошибка при получении данных из кеша: %v; ошибка при получении данных из БД: %v", errCache, errDB)
-	}
-
-	// Преобразовать настройки из БД в map для сравнения
+	// Преобразуем настройки из БД в map для сравнения
 	dbSettingsMap := make(map[string]string)
-	if dbSettings != nil {
-		for _, setting := range dbSettings {
-			dbSettingsMap[setting.Key] = setting.Value
+	for _, setting := range dbSettings {
+		if setting == nil {
+			continue
 		}
+		dbSettingsMap[setting.Key] = setting.Value
 	}
 
 	// Отправить сформатированное сравнение

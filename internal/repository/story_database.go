@@ -387,7 +387,7 @@ func (s *StoryDatabaseImpl) GetSetting(ctx context.Context, key string) (*models
 	return st, nil
 }
 
-func (s *StoryDatabaseImpl) SetSetting(ctx context.Context, key string, value string, updatedby int64) error {
+func (s *StoryDatabaseImpl) SetSetting(ctx context.Context, tx pgx.Tx, key string, value string, updatedby int64) error {
 	query := `
 		INSERT INTO settings (key, value, updated_at, updated_by)
 		VALUES ($1, $2, now(), $3)
@@ -396,7 +396,7 @@ func (s *StoryDatabaseImpl) SetSetting(ctx context.Context, key string, value st
 			updated_at = now(),
 			updated_by = $3
 	`
-	_, err := s.databaseclient.Pool.Exec(ctx, query, key, value, updatedby)
+	_, err := tx.Exec(ctx, query, key, value, updatedby)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}
