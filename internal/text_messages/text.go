@@ -62,6 +62,23 @@ var TextCommandForHelp = []textCommandForHelp{
 	},
 }
 
+var TextCommandForAdmin = []textCommandForHelp{
+	{
+		Command: "/viewSetting",
+		Text:    "👁 Просмотр настроек ",
+	},
+	{
+		Command: "/changeSetting",
+		Text:    "⚙️ Изменение настроек",
+	},
+	{
+		Command: "/rebootCache",
+		Text:    "♻️ Перезагрузка кэша",
+	},
+}
+
+
+
 // здесь сплита нет - передается единое сообщение
 var TextStartCreateHero = `
 🎲 Начинаем новое приключение!  
@@ -92,6 +109,14 @@ func TextHelp() string {
 		text += command.Command + " - " + command.Text + "\n"
 	}
 	return text
+}
+
+func TextAdmin() string {
+	resp := "👑 Админ-команды:\n"
+	for _, cmd := range TextCommandForAdmin {
+		resp += cmd.Command + " - " + cmd.Text + "\n"
+	}
+	return resp
 }
 
 // --- символ для сплита при анимации

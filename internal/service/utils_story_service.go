@@ -5,6 +5,7 @@ import (
 	"bot_story_generator/internal/text_messages"
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -57,7 +58,17 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 	//TODO проверить дневные лимиты с учетом подписки
 	if limit == nil {
 		//создаем новый лимит
-		limit = models.NewDailyLimit(userID, 0, s.baseDayLimit)
+		baseDayLimitStr, err := s.CStory.GetSetting(ctx, "limit.day.base")
+		if err != nil {
+			s.Logger.ZapLogger.Error("Failed to get day limit from cache", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
+		}
+		baseDayLimit, convErr := strconv.Atoi(baseDayLimitStr)
+		if convErr != nil {
+			s.Logger.ZapLogger.Error("Atoi limit.day.base", zap.Error(convErr), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
+		}
+		limit = models.NewDailyLimit(userID, 0, baseDayLimit)
 	}
 	if limit.LimitCount <= limit.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID), zap.Any("place", LogPlace))

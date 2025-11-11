@@ -64,9 +64,6 @@ type DatabaseConfig struct {
 
 type ServerSetting struct {
 	NumWorkers             int
-	TokenDayLimit          int
-	PremiumTokenDayLimit   int
-	PriceBasicSubscription int
 	Admins                 map[int64]struct{}
 }
 
@@ -134,23 +131,6 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokenLimit := os.Getenv("TOKEN_DAY_LIMIT")
-	numTokenLimit, err := strconv.Atoi(tokenLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	premiumLimit := os.Getenv("PREMIUM_TOKEN_DAY_LIMIT")
-	numPremiumLimit, err := strconv.Atoi(premiumLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	priceBasicS := os.Getenv("PRICE_BASIC_SUBSCRIPTION")
-	numPriceBasicS, err := strconv.Atoi(priceBasicS)
-	if err != nil {
-		return nil, err
-	}
 
 	cacheurl := os.Getenv("CACHE_URL")
 
@@ -209,9 +189,6 @@ func NewConfig() (*Config, error) {
 			URL:            databaseConnectUrl,
 		},
 		Setting: ServerSetting{
-			TokenDayLimit:          numTokenLimit,
-			PremiumTokenDayLimit:   numPremiumLimit,
-			PriceBasicSubscription: numPriceBasicS,
 			NumWorkers:             num,
 			Admins:                 intAdminIDs,
 		},

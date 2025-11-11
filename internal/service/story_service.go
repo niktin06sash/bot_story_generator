@@ -63,14 +63,11 @@ type StoryCache interface {
 	CheckExceededLimit(ctx context.Context, userID int64) (bool, error)
 
 	SetSetting(ctx context.Context, key, value string) error
+	GetSetting(ctx context.Context, key string) (string, error)
 	GetAllSettings(ctx context.Context) (map[string]string, error)
 	LoadCacheData(ctx context.Context, settings []*models.Setting) error
 }
 type StoryServiceImpl struct {
-	priceBasicSubscription int
-	baseDayLimit           int
-	premiumDayLimit        int
-
 	DBStory StoryDatabase
 	AIStory StoryAI
 	CStory  StoryCache
@@ -80,9 +77,6 @@ type StoryServiceImpl struct {
 // TODO в конфиге добавь недостающие данные
 func NewStoryService(cfg *config.Config, db StoryDatabase, ai StoryAI, cache StoryCache, logger *logger.Logger) *StoryServiceImpl {
 	return &StoryServiceImpl{
-		priceBasicSubscription: cfg.Setting.PriceBasicSubscription,
-		baseDayLimit:           cfg.Setting.TokenDayLimit,
-		premiumDayLimit:        cfg.Setting.PremiumTokenDayLimit,
 		DBStory:                db,
 		AIStory:                ai,
 		CStory:                 cache,
@@ -448,7 +442,18 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 	nameSub := text_messages.NameBasicSubscription
 
 	payload := fmt.Sprintf("%s_%s_%d_%d", nameSub, currencySubscription, userID, time.Now().Unix())
-	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, s.priceBasicSubscription)
+	price, err := s.CStory.GetSetting(ctx, "sub.basic.price")
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to get subscription price from cache", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextErrorProcessPayment)
+	}
+
+	priceInt, err := strconv.Atoi(price)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to convert subscription price to int", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextErrorProcessPayment)
+	}
+	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, priceInt)
 	err = s.DBStory.AddSubscription(ctx, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))

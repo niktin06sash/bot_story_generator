@@ -346,7 +346,20 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				r.createOutboundMessage(r.ctx, userID, "Кэш успешно перезагружен")
 				r.cleanUserState(userID)
-				
+			
+			} else if data == "admin" {
+				// Выводим админские команды
+				if !r.CheckAdmin(userID) {
+					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
+					r.cleanUserState(userID)
+					continue
+				}
+
+				resp := text_messages.TextAdmin()
+				r.createOutboundMessage(r.ctx, userID, resp)
+				r.cleanUserState(userID)
+
 			} else {
 				//2 лог
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID))
