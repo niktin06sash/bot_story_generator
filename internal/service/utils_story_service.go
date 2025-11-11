@@ -5,6 +5,7 @@ import (
 	"bot_story_generator/internal/text_messages"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -80,4 +81,35 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
 	}
 	return limit, nil
+}
+
+// getAllSettingsFromCache получает все настройки из кэша (Redis)
+func (s *StoryServiceImpl) getAllSettingsFromCache(ctx context.Context) (map[string]string, error) {
+	place := "getAllSettingsFromCache"
+	if s.CStory == nil {
+		return nil, errors.New("cache client is not initialized")
+	}
+	settings, err := s.CStory.GetAllSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get settings from cache: %w", err)
+	}
+	s.Logger.ZapLogger.Info("Settings loaded from cache successfully", zap.Any("count", len(settings)), zap.Any("place", place))
+	return settings, nil
+}
+
+// getAllSettingsFromDB получает все настройки из базы данных (PostgreSQL)
+func (s *StoryServiceImpl) getAllSettingsFromDB(ctx context.Context) ([]*models.Setting, error) {
+	place := "getAllSettingsFromDB"
+	if s.DBStory == nil {
+		return nil, errors.New("database client is not initialized")
+	}
+	settings, err := s.DBStory.GetAllSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get settings from database: %w", err)
+	}
+	if settings == nil {
+		return nil, errors.New("settings from database is nil")
+	}
+	s.Logger.ZapLogger.Info("Settings loaded from database successfully", zap.Any("count", len(settings)), zap.Any("place", place))
+	return settings, nil
 }

@@ -49,7 +49,7 @@ type StoryDatabase interface {
 
 	GetAllSettings(ctx context.Context) ([]*models.Setting, error)
 	GetSetting(ctx context.Context, key string) (*models.Setting, error)
-	SetSetting(ctx context.Context,  tx pgx.Tx, key string, value string, updatedby int64) error
+	SetSetting(ctx context.Context, tx pgx.Tx, setting *models.Setting) error
 }
 type StoryAI interface {
 	GetStructuredHeroes(ctx context.Context) (*models.FantasyCharacters, error)
@@ -77,10 +77,10 @@ type StoryServiceImpl struct {
 // TODO в конфиге добавь недостающие данные
 func NewStoryService(cfg *config.Config, db StoryDatabase, ai StoryAI, cache StoryCache, logger *logger.Logger) *StoryServiceImpl {
 	return &StoryServiceImpl{
-		DBStory:                db,
-		AIStory:                ai,
-		CStory:                 cache,
-		Logger:                 logger,
+		DBStory: db,
+		AIStory: ai,
+		CStory:  cache,
+		Logger:  logger,
 	}
 }
 
@@ -313,7 +313,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	return []string{msg, resp}, nil
 }
 
-func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]string, error) {
+func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) (string, error) {
 	place := "CreateUser"
 	isExist, err := s.CStory.CheckCreatedUser(ctx, userID)
 	if err != nil {
@@ -321,7 +321,7 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 	} else if isExist {
 		//3 лог
 		s.Logger.ZapLogger.Info("CheckCreatedUser User is already created. Returning response", zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextGreeting)
+		return "", errors.New(text_messages.TextGreeting)
 	} else if !isExist {
 		//3 лог
 		s.Logger.ZapLogger.Info("CheckCreatedUser Created user not in cache. Trying creating in database...", zap.Any("userID", userID), zap.Any("place", place))
@@ -335,49 +335,49 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) ([]stri
 			if err != nil {
 				s.Logger.ZapLogger.Warn("AddCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 			}
-			return nil, errors.New(text_messages.TextGreeting)
+			return "", errors.New(text_messages.TextGreeting)
 		}
 		s.Logger.ZapLogger.Error("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
+		return "", errors.New(text_messages.TextErrorCreateTask)
 	}
 	//4 лог
 	s.Logger.ZapLogger.Info("User created successfully", zap.Any("userID", userID), zap.Any("place", place))
-	return []string{text_messages.TextGreeting}, nil
+	return text_messages.TextGreeting, nil
 }
 
-func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) ([]string, error) {
+func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) (string, error) {
 	place := "StopStory"
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
+		return "", errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) > 1 {
 		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(fmt.Errorf("server: more one active story found")), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
+		return "", errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(stories) == 0 {
 		s.Logger.ZapLogger.Warn("GetActiveStories", zap.Error(fmt.Errorf("client: user already has not an active history")), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextNoActiveStory)
+		return "", errors.New(text_messages.TextNoActiveStory)
 	}
 	//3 лог
 	s.Logger.ZapLogger.Info("Active story checked successfully", zap.Any("userID", userID), zap.Any("place", place))
-	return []string{text_messages.TextStopActiveStory}, nil
+	return text_messages.TextStopActiveStory, nil
 }
 
-func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) ([]string, error) {
+func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error) {
 	if arg == "❌" {
-		return nil, nil
+		return "", nil
 	}
 	place := "StopStoryChoice"
 	err := s.DBStory.StopStory(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
+		return "", errors.New(text_messages.TextErrorCreateTask)
 	}
 	//3 лог
 	s.Logger.ZapLogger.Info("Active story stopped successfully", zap.Any("userID", userID), zap.Any("place", place))
-	return []string{text_messages.TextSuccessStopStory}, nil
+	return text_messages.TextSuccessStopStory, nil
 }
 
 func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
@@ -481,162 +481,106 @@ func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.Pa
 	return nil
 }
 
-func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) ([]string, error) {
+func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
 	place := "GetSubscriptionStatus"
 	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorGetSubscriptionStatus)
+		return "", errors.New(text_messages.TextErrorGetSubscriptionStatus)
 	}
 	if len(subscriptions) > 1 {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorGetSubscriptionStatus)
+		return "", errors.New(text_messages.TextErrorGetSubscriptionStatus)
 	}
 	if len(subscriptions) == 0 {
-		return []string{text_messages.CreateNoSubscriptionMessage()}, nil
+		return text_messages.CreateNoSubscriptionMessage(), nil
 	}
 
 	sub := subscriptions[0]
 	typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
-	response := text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData)
-	return []string{response}, nil
+	return text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData), nil
 }
 
 // SetSetting изменяет значение настройки (только для админов)
-func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) error {
+func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error) {
+	place := "SetSetting"
 	if key == "" {
-		return errors.New("key cannot be empty")
+		s.Logger.ZapLogger.Warn("Empty Key", zap.Any("key", key), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
-
-	// Валидация значения в зависимости от ключа настройки
 	switch key {
 	case "sub.basic.price":
 		price, err := strconv.Atoi(value)
 		if err != nil || price <= 0 {
-			return errors.New("invalid price value: must be a positive number")
+			s.Logger.ZapLogger.Warn("Invalid Price", zap.Any("key", key), zap.Any("place", place))
+			return "", errors.New(text_messages.TextErrorSettings)
 		}
 
 	case "limit.day.base":
 		limit, err := strconv.Atoi(value)
 		if err != nil || limit < 0 {
-			return errors.New("invalid base day limit: must be a non-negative number")
+			s.Logger.ZapLogger.Warn("Invalid LimitDay", zap.Any("key", key), zap.Any("place", place))
+			return "", errors.New(text_messages.TextErrorSettings)
 		}
 	case "limit.day.adventure+":
 		limit, err := strconv.Atoi(value)
 		if err != nil || limit < 0 {
-			return errors.New("invalid premium day limit: must be a non-negative number")
+			s.Logger.ZapLogger.Warn("Invalid LimitDay", zap.Any("key", key), zap.Any("place", place))
+			return "", errors.New(text_messages.TextErrorSettings)
 		}
 	default:
-		return fmt.Errorf("unknown setting key: %s", key)
+		s.Logger.ZapLogger.Warn("Unknown setting key", zap.Any("key", key), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
-
-	// Создаем транзакцию
 	tx, err := s.DBStory.BeginTx(ctx)
 	if err != nil {
-		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("place", "SetSetting"))
-		return fmt.Errorf("failed to start transaction: %w", err)
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
-
-	// Сохраняем настройку в БД в рамках транзакции
-	err = s.DBStory.SetSetting(ctx, tx, key, value, updatedBy)
+	setting := models.NewSetting(key, value, updatedBy)
+	err = s.DBStory.SetSetting(ctx, tx, setting)
 	if err != nil {
 		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
 		}
-		return fmt.Errorf("failed to save setting: %w", err)
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	// Коммитим транзакцию, только если кэш успешно обновился
-	if s.CStory != nil {
-		if err := s.CStory.SetSetting(ctx, key, value); err != nil {
-			s.Logger.ZapLogger.Error("Failed to update cache after setting change",
-				zap.Error(err), zap.String("key", key), zap.String("value", value))
-			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
-			if rollbackErr != nil {
-				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
-			}
-			return fmt.Errorf("failed to update cache: %w", err)
-		}
-	} else {
-		s.Logger.ZapLogger.Error("Cache client is nil, skipping cache update", zap.String("key", key))
+	err = s.CStory.SetSetting(ctx, key, value)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to update cache after setting change", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
 		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
 		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key))
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
 		}
-		return errors.New("cache client is not initialized")
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	// Подтверждаем транзакцию
 	if err := s.DBStory.CommitTx(ctx, tx); err != nil {
-		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.String("key", key))
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	s.Logger.ZapLogger.Info("Setting updated successfully",
-		zap.String("key", key),
-		zap.String("value", value),
-		zap.Int64("updatedBy", updatedBy))
+	s.Logger.ZapLogger.Info("Setting updated successfully", zap.Any("key", key), zap.Any("place", place))
 
-	return nil
-}
-
-// GetAllSettingsFromCache получает все настройки из кэша (Redis)
-func (s *StoryServiceImpl) GetAllSettingsFromCache(ctx context.Context) (map[string]string, error) {
-	place := "GetAllSettingsFromCache"
-	if s.CStory == nil {
-		s.Logger.ZapLogger.Warn("Cache client is nil", zap.Any("place", place))
-		return nil, errors.New("cache client is not initialized")
-	}
-	settings, err := s.CStory.GetAllSettings(ctx)
-	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from cache",
-			zap.Error(err), zap.Any("place", place))
-		return nil, fmt.Errorf("failed to get settings from cache: %w", err)
-	}
-	s.Logger.ZapLogger.Info("Settings loaded from cache successfully",
-		zap.Any("count", len(settings)), zap.Any("place", place))
-	return settings, nil
-}
-
-// GetAllSettingsFromDB получает все настройки из базы данных (PostgreSQL)
-func (s *StoryServiceImpl) GetAllSettingsFromDB(ctx context.Context) ([]*models.Setting, error) {
-	place := "GetAllSettingsFromDB"
-	if s.DBStory == nil {
-		s.Logger.ZapLogger.Warn("Database client is nil", zap.Any("place", place))
-		return nil, errors.New("database client is not initialized")
-	}
-	settings, err := s.DBStory.GetAllSettings(ctx)
-	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from database",
-			zap.Error(err), zap.Any("place", place))
-		return nil, fmt.Errorf("failed to get settings from database: %w", err)
-	}
-	if settings == nil {
-		s.Logger.ZapLogger.Warn("Settings from database is nil", zap.Any("place", place))
-		return nil, errors.New("settings from database is nil")
-	}
-	s.Logger.ZapLogger.Info("Settings loaded from database successfully",
-		zap.Any("count", len(settings)), zap.Any("place", place))
-	return settings, nil
+	return text_messages.TextSuccessSetSetting, nil
 }
 
 func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
-	// Получить настройки из кеша
-	cacheSettings, errCache := s.GetAllSettingsFromCache(ctx)
-	if errCache != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(errCache))
-		return "⚠️ Ошибка при получении данных из кеша: "+errCache.Error(), errCache
+	place := "ViewSetting"
+	cacheSettings, err := s.getAllSettingsFromCache(ctx)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(err), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	// Получить настройки из БД
-	dbSettings, errDB := s.GetAllSettingsFromDB(ctx)
-	if errDB != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from database", zap.Error(errDB))
-		return "⚠️ Ошибка при получении данных из БД: "+errDB.Error(), errDB
+	dbSettings, err := s.getAllSettingsFromDB(ctx)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Failed to get settings from database", zap.Error(err), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	// Преобразуем настройки из БД в map для сравнения
 	dbSettingsMap := make(map[string]string)
 	for _, setting := range dbSettings {
 		if setting == nil {
@@ -645,25 +589,22 @@ func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 		dbSettingsMap[setting.Key] = setting.Value
 	}
 
-	// Отправить сформатированное сравнение
 	formattedMessage := text_messages.FormatSettingsComparison(cacheSettings, dbSettingsMap)
 	return formattedMessage, nil
 }
 
 func (s *StoryServiceImpl) RebootCacheData(ctx context.Context) error {
+	place := "RebootCacheData"
 	settings, err := s.DBStory.GetAllSettings(ctx)
 	if err != nil {
-		s.Logger.ZapLogger.Debug("Failed to get settings from Database",
-			zap.Error(err),
-		)
-		return err
+		s.Logger.ZapLogger.Error("Failed to get settings from Database", zap.Error(err), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorSettings)
 	}
 	err = s.CStory.LoadCacheData(ctx, settings)
 	if err != nil {
-		s.Logger.ZapLogger.Debug("Failed to load settings into Cache",
-			zap.Error(err),
-		)
-		return err
+		s.Logger.ZapLogger.Error("Failed to load settings into Cache", zap.Error(err), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorSettings)
 	}
+	s.Logger.ZapLogger.Info("Setting rebooted successfully", zap.Any("place", place))
 	return nil
 }

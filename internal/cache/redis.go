@@ -14,11 +14,12 @@ type CacheObject struct {
 	Connect          *redis.Client
 	UserCreatedKey   string
 	ExceededLimitKey string
+	SettingsKey      string
 	logger           *logger.Logger
 }
 
 func NewCacheConnection(cfg *config.Config, logger *logger.Logger) (*CacheObject, error) {
-	cacheobject := &CacheObject{UserCreatedKey: cfg.Cache.UserCreatedKey, ExceededLimitKey: cfg.Cache.ExceededLimitKey, logger: logger}
+	cacheobject := &CacheObject{UserCreatedKey: cfg.Cache.UserCreatedKey, ExceededLimitKey: cfg.Cache.ExceededLimitKey, logger: logger, SettingsKey: cfg.Cache.SettingsKey}
 	err := cacheobject.Open(cfg.Cache.URL, cfg.Cache.ConnectTimeout)
 	if err != nil {
 		return nil, err

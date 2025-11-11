@@ -77,7 +77,9 @@ var TextCommandForAdmin = []textCommandForHelp{
 	},
 }
 
-
+// не будем конкретную ошибку писать в тг - просто сообщение-предупреждение
+var TextErrorSettings = "Ошибка при взаимодействии с данными настройки. Проверьте логи!"
+var TextSuccessSetSetting = "Настройка успешно изменена"
 
 // здесь сплита нет - передается единое сообщение
 var TextStartCreateHero = `
@@ -380,4 +382,3 @@ func FormatSettingsComparison(cacheSettings map[string]string, dbSettings map[st
 	resp += Divider
 	return resp
 }
-

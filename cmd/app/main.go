@@ -10,6 +10,7 @@ import (
 	"bot_story_generator/internal/router"
 	"bot_story_generator/internal/service"
 	tgbot "bot_story_generator/internal/tg_bot"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -70,11 +71,31 @@ func main() {
 	//бизнес-логика(база данных + ии)
 	storyService := service.NewStoryService(cfg, storyDatabase, aiB, storyCache, logger)
 
+	// получение переменных настроек из базы и загрузка в кэш
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	settings, err := storyDatabase.GetAllSettings(ctx)
+	if err != nil {
+		logger.ZapLogger.Debug("Failed to get settings from Database",
+			zap.Error(err),
+		)
+		return
+	}
+	logger.ZapLogger.Debug("Successful get settings from Database")
+	err = storyCache.LoadCacheData(ctx, settings)
+	if err != nil {
+		logger.ZapLogger.Debug("Failed to load settings into Cache",
+			zap.Error(err),
+		)
+		return
+	}
+	logger.ZapLogger.Debug("Successful load settings into Cache")
 	//роутер
 	router := router.NewRouter(cfg, storyService, logger)
 	defer router.Stop()
 	router.StartRouter()
 	logger.ZapLogger.Debug("Successful start Router-Workers")
+	//запуск бота
 	bot, err := tgbot.NewBot(cfg, logger, router)
 	if err != nil {
 		logger.ZapLogger.Debug("Failed to initialize Telegram bot",
@@ -84,25 +105,6 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Telegram Bot-connect")
 	defer bot.Stop()
-
-	// получение переменных настроек из базы и загрузка в кэш
-	ctx := bot.Ctx()
-	settings, err := storyDatabase.GetAllSettings(ctx)
-	if err != nil {
-		logger.ZapLogger.Debug("Failed to get settings from Database",
-			zap.Error(err),
-		)
-		return
-	}
-	err = storyCache.LoadCacheData(ctx, settings)
-	if err != nil {
-		logger.ZapLogger.Debug("Failed to load settings into Cache",
-			zap.Error(err),
-		)
-		return
-	}
-
-	//запуск бота
 	bot.StartBot()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)

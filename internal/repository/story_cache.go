@@ -4,6 +4,7 @@ import (
 	"bot_story_generator/internal/cache"
 	"bot_story_generator/internal/models"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,13 +13,11 @@ import (
 
 type StoryCacheImpl struct {
 	cacheclient *cache.CacheObject
-	prefixSettingKey string
 }
 
 func NewStoryCache(cache *cache.CacheObject) *StoryCacheImpl {
 	return &StoryCacheImpl{
 		cacheclient: cache,
-		prefixSettingKey: "settings:%s",
 	}
 }
 func (s *StoryCacheImpl) AddExceededLimit(ctx context.Context, userID int64) error {
@@ -62,12 +61,12 @@ func (s *StoryCacheImpl) CheckCreatedUser(ctx context.Context, userID int64) (bo
 // загрузка конфигурации кэша из бд
 func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings []*models.Setting) error {
 	if settings == nil {
-		return fmt.Errorf("settings is nil")
+		return errors.New("settings is nil")
 	}
 	allName := models.NameSettingKeys()
 	// Записываем каждую настройку в Redis с ключом settings:<key>
 	for _, st := range settings {
-		key := fmt.Sprintf(s.prefixSettingKey, st.Key)
+		key := fmt.Sprintf(s.cacheclient.SettingsKey, st.Key)
 		// Сохраняем значение как строку без TTL (пока)
 		err := s.cacheclient.Connect.Set(ctx, key, st.Value, 0).Err()
 		if err != nil {
@@ -78,10 +77,10 @@ func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings []*models.S
 	// Проверяем, что все ожидаемые ключи присутствуют в кэше
 	var missing []string
 	for _, name := range allName {
-		key := fmt.Sprintf(s.prefixSettingKey, name)
+		key := fmt.Sprintf(s.cacheclient.SettingsKey, name)
 		exists, err := s.cacheclient.Connect.Exists(ctx, key).Result()
 		if err != nil {
-			return fmt.Errorf("failed to verify setting %s in cache: %w", name, err)
+			return err
 		}
 		if exists == 0 {
 			missing = append(missing, name)
@@ -96,12 +95,9 @@ func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings []*models.S
 
 // SetSetting сохраняет отдельную настройку в кэше
 func (s *StoryCacheImpl) SetSetting(ctx context.Context, key, value string) error {
-	if key == "" {
-		return fmt.Errorf("key is empty")
-	}
-	redisKey := fmt.Sprintf(s.prefixSettingKey, key)
+	redisKey := fmt.Sprintf(s.cacheclient.SettingsKey, key)
 	if err := s.cacheclient.Connect.Set(ctx, redisKey, value, 0).Err(); err != nil {
-		return fmt.Errorf("failed to set cache key %s: %w", redisKey, err)
+		return err
 	}
 	return nil
 }
@@ -113,14 +109,14 @@ func (s *StoryCacheImpl) GetAllSettings(ctx context.Context) (map[string]string,
 	var missing []string
 
 	for _, name := range keys {
-		redisKey := fmt.Sprintf(s.prefixSettingKey, name)
+		redisKey := fmt.Sprintf(s.cacheclient.SettingsKey, name)
 		val, err := s.cacheclient.Connect.Get(ctx, redisKey).Result()
 		if err != nil {
 			if err == redis.Nil {
 				missing = append(missing, name)
 				continue
 			}
-			return nil, fmt.Errorf("failed to get cache key %s: %w", redisKey, err)
+			return nil, err
 		}
 		res[name] = val
 	}
@@ -132,10 +128,10 @@ func (s *StoryCacheImpl) GetAllSettings(ctx context.Context) (map[string]string,
 }
 
 func (s *StoryCacheImpl) GetSetting(ctx context.Context, key string) (string, error) {
-	redisKey := fmt.Sprintf(s.prefixSettingKey, key)
+	redisKey := fmt.Sprintf(s.cacheclient.SettingsKey, key)
 	val, err := s.cacheclient.Connect.Get(ctx, redisKey).Result()
 	if err != nil {
-		return "", fmt.Errorf("failed to get cache key %s: %w", redisKey, err)
+		return "", err
 	}
 	return val, nil
 }

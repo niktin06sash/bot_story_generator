@@ -32,6 +32,7 @@ type CacheConfig struct {
 	URL              string
 	UserCreatedKey   string
 	ExceededLimitKey string
+	SettingsKey      string
 }
 
 type TelegramConfig struct {
@@ -63,8 +64,8 @@ type DatabaseConfig struct {
 }
 
 type ServerSetting struct {
-	NumWorkers             int
-	Admins                 map[int64]struct{}
+	NumWorkers int
+	Admins     map[int64]struct{}
 }
 
 func NewConfig() (*Config, error) {
@@ -135,7 +136,8 @@ func NewConfig() (*Config, error) {
 	cacheurl := os.Getenv("CACHE_URL")
 
 	cachereguser := os.Getenv("CACHE_USER_CREATED_KEY")
-
+	//settings:%s
+	cachesettingskey := os.Getenv("CACHE_SETTINGS_KEY")
 	cacheexceededlimit := os.Getenv("CACHE_EXCEEDED_LIMIT_KEY")
 
 	cacheConnectTimeout := os.Getenv("CACHE_CONNECT_TIMEOUT")
@@ -189,14 +191,15 @@ func NewConfig() (*Config, error) {
 			URL:            databaseConnectUrl,
 		},
 		Setting: ServerSetting{
-			NumWorkers:             num,
-			Admins:                 intAdminIDs,
+			NumWorkers: num,
+			Admins:     intAdminIDs,
 		},
 		Cache: CacheConfig{
 			ConnectTimeout:   cachecondur,
 			URL:              cacheurl,
 			UserCreatedKey:   cachereguser,
 			ExceededLimitKey: cacheexceededlimit,
+			SettingsKey:      cachesettingskey,
 		},
 	}
 

@@ -565,7 +565,3 @@ func (bot *Bot) Stop() {
 	bot.router.CloseInputChans()
 	bot.logger.ZapLogger.Debug("Successful stop Telegram Bot")
 }
-
-func (bot *Bot) Ctx() context.Context {
-	return bot.ctx
-}
