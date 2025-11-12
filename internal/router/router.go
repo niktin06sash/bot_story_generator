@@ -105,7 +105,7 @@ func (r *StoryRouterImpl) paymentWorker() {
 				r.userState[data.UserID] = struct{}{}
 				r.mux.Unlock()
 				if data.ChargeID == "" && data.QueryID != "" {
-					r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID))
+					r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 					err := r.service.ValidatePreCheckout(r.ctx, data)
 					if err != nil {
 						data.Error = err
@@ -117,7 +117,7 @@ func (r *StoryRouterImpl) paymentWorker() {
 					r.cleanUserState(data.UserID)
 
 				} else if data.ChargeID != "" && data.QueryID == "" {
-					r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID))
+					r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 					err := r.service.CommitSubscription(r.ctx, data)
 					if err != nil {
 						data.Error = err

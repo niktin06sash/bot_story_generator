@@ -182,7 +182,7 @@ func (s *StoryDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyL
 	return nil
 }
 
-func (s *StoryDatabaseImpl) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
+func (s *StoryDatabaseImpl) UpdateCountDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
 	query := `
         UPDATE dailyLimits 
         SET count = $1
@@ -193,6 +193,15 @@ func (s *StoryDatabaseImpl) UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dai
 		return fmt.Errorf("server: database error: %w", err)
 	}
 	return nil
+}
+func (s *StoryDatabaseImpl) UpdateLimitCountDailyLimit(ctx context.Context, dailyLimit *models.DailyLimit) error {
+	query := `
+        UPDATE dailyLimits 
+        SET limitCount = $1
+        WHERE userID = $2 AND date = CURRENT_DATE
+    `
+	_, err := s.databaseclient.Pool.Exec(ctx, query, dailyLimit.LimitCount, dailyLimit.UserID)
+	return err
 }
 
 // MESSAGES
@@ -266,25 +275,18 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 	}
 	return nil
 }
-func (s *StoryDatabaseImpl) GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error) {
+func (s *StoryDatabaseImpl) GetStatusSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error) {
 	query := `
-		SELECT payload, chargeId, userID, type, status, startDate, endDate, isAutoRenewal, currency, price
+		SELECT payload, userID, status
 		FROM subscriptions 
-        WHERE userID = $1 AND payload = $2 AND status = 'pending'
+        WHERE userID = $1 AND payload = $2
 	`
 	row := s.databaseclient.Pool.QueryRow(ctx, query, userID, payload)
 	sub := &models.Subscription{}
 	err := row.Scan(
 		&sub.Payload,
-		&sub.ChargeId,
 		&sub.UserID,
-		&sub.Type,
 		&sub.Status,
-		&sub.StartDate,
-		&sub.EndDate,
-		&sub.IsAutoRenewal,
-		&sub.Currency,
-		&sub.Price,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -294,7 +296,7 @@ func (s *StoryDatabaseImpl) GetPendingSubscription(ctx context.Context, payload 
 	}
 	return sub, nil
 }
-func (s *StoryDatabaseImpl) UpdatePendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error {
+func (s *StoryDatabaseImpl) PayedPendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error {
 	query := `
 		UPDATE subscriptions 
         SET 
@@ -305,9 +307,23 @@ func (s *StoryDatabaseImpl) UpdatePendingSubscription(ctx context.Context, paylo
         WHERE 
             userID = $1 
             AND payload = $2 
-            AND status = 'pending'
 	`
 	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, payload, start, end, changeID)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}
+func (s *StoryDatabaseImpl) RejectedPendingSubscription(ctx context.Context, payload string, userID int64) error {
+	query := `
+		UPDATE subscriptions 
+        SET 
+            status = 'rejected',
+        WHERE 
+            userID = $1 
+            AND payload = $2 
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query, userID, payload)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}

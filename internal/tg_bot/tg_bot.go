@@ -522,10 +522,10 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 		startParameter = ""
 	}
 	// Диагностика: логируем сумму и userID
-	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Int("amount", sub.Price), zap.Int64("userID", sub.UserID), zap.String("currency", sub.Currency))
+	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("currency", sub.Currency))
 
 	if sub.Price <= 0 {
-		bot.logger.ZapLogger.Warn("Subscription price is zero or negative, aborting invoice send", zap.Int("amount", sub.Price), zap.Int64("userID", sub.UserID))
+		bot.logger.ZapLogger.Warn("Subscription price is zero or negative, aborting invoice send", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload))
 		_, _ = bot.api.Send(tgbotapi.NewMessage(sub.UserID, "Ошибка: сумма подписки не настроена. Пожалуйста, свяжитесь с поддержкой."))
 		return
 	}
@@ -549,9 +549,9 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 	invoice.SuggestedTipAmounts = []int{}
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
-		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID))
+		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload))
 	} else {
-		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID))
+		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID), zap.Any("payload", sub.Payload))
 		bot.mux.Lock()
 		bot.payload_msgId[sub.Payload] = msg.MessageID
 		bot.mux.Unlock()

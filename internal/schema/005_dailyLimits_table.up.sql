@@ -1,7 +1,7 @@
 CREATE TABLE dailyLimits (
     userID      BIGINT NOT NULL,
     date        DATE NOT NULL DEFAULT CURRENT_DATE,
-    count    INT NOT NULL DEFAULT 1,
+    count       INT NOT NULL,
     limitCount  INT NOT NULL,
     PRIMARY KEY (userID, date),
     CONSTRAINT fk_user

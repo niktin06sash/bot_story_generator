@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, step int, LogPlace string) error {
@@ -27,7 +28,7 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 		}
 	} else {
 		limit.Count += step
-		err = s.DBStory.UpdateDailyLimit(ctx, tx, limit)
+		err = s.DBStory.UpdateCountDailyLimit(ctx, tx, limit)
 		if err != nil {
 			s.Logger.ZapLogger.Error("UpdateDailyLimit", zap.Error(err), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
@@ -51,17 +52,43 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 		s.Logger.ZapLogger.Info("CheckExceededLimit Exceeded Limits not in cache. Checking in database...", zap.Any("userID", userID), zap.Any("place", LogPlace))
 	}
 	// Проверяем в базе данных, есть ли дневные ходы у пользователя для создания новой истории
-	limit, err := s.DBStory.GetDailyLimit(ctx, userID)
-	if err != nil {
-		s.Logger.ZapLogger.Error("GetDailyLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	//TODO проверить дневные лимиты с учетом подписки
-	if limit == nil {
-		//создаем новый лимит
-		baseDayLimitStr, err := s.CStory.GetSetting(ctx, "limit.day.base")
+	var limitv *models.DailyLimit
+	var subb *models.Subscription
+	g, ctx := errgroup.WithContext(ctx)
+	//параллельно делаем запросы для получения данных дневного лимита и подписки(если есть хоть одна ошибка - прекращаем выполнение)
+	g.Go(func() error {
+		limit, err := s.DBStory.GetDailyLimit(ctx, userID)
 		if err != nil {
-			s.Logger.ZapLogger.Error("Failed to get day limit from cache", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			s.Logger.ZapLogger.Error("GetDailyLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return errors.New(text_messages.TextErrorCreateTask)
+		}
+		limitv = limit
+		return nil
+	})
+	g.Go(func() error {
+		subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+		if err != nil {
+			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return errors.New(text_messages.TextErrorCreateTask)
+		}
+		if len(subscriptions) > 1 {
+			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return errors.New(text_messages.TextErrorCreateTask)
+		}
+		if len(subscriptions) == 1 {
+			subb = subscriptions[0]
+		}
+		return nil
+	})
+	err = g.Wait()
+	if err != nil {
+		return nil, err
+	}
+	//сегодня ходов еще не было + подписка неактивна
+	if limitv == nil && subb == nil {
+		baseDayLimitStr, err := s.CStory.GetSetting(ctx, models.SettingKeyLimitBaseDay)
+		if err != nil {
+			s.Logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
 		baseDayLimit, convErr := strconv.Atoi(baseDayLimitStr)
@@ -69,9 +96,23 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 			s.Logger.ZapLogger.Error("Atoi limit.day.base", zap.Error(convErr), zap.Any("userID", userID), zap.Any("place", LogPlace))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
-		limit = models.NewDailyLimit(userID, 0, baseDayLimit)
+		limitv = models.NewDailyLimit(userID, 0, baseDayLimit)
 	}
-	if limit.LimitCount <= limit.Count {
+	//сегодня ходов еще не было + подписка активна
+	if limitv == nil && subb != nil {
+		premDayLimitStr, err := s.CStory.GetSetting(ctx, models.SettingKeyLimitPremiumDay)
+		if err != nil {
+			s.Logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
+		}
+		premDayLimit, convErr := strconv.Atoi(premDayLimitStr)
+		if convErr != nil {
+			s.Logger.ZapLogger.Error("Atoi limit.day.premium", zap.Error(convErr), zap.Any("userID", userID), zap.Any("place", LogPlace))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
+		}
+		limitv = models.NewDailyLimit(userID, 0, premDayLimit)
+	}
+	if limitv.LimitCount <= limitv.Count {
 		s.Logger.ZapLogger.Warn("GetDailyLimit", zap.Error(errors.New("client: user has exceeded daily action limit")), zap.Any("userID", userID), zap.Any("place", LogPlace))
 		//Добавляем превышение лимита в кэш
 		err := s.CStory.AddExceededLimit(ctx, userID)
@@ -80,7 +121,7 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 		}
 		return nil, errors.New(text_messages.TextErrorUserDailyLimit)
 	}
-	return limit, nil
+	return limitv, nil
 }
 
 // getAllSettingsFromCache получает все настройки из кэша (Redis)
@@ -112,4 +153,18 @@ func (s *StoryServiceImpl) getAllSettingsFromDB(ctx context.Context) ([]*models.
 	}
 	s.Logger.ZapLogger.Info("Settings loaded from database successfully", zap.Any("count", len(settings)), zap.Any("place", place))
 	return settings, nil
+}
+func (s *StoryServiceImpl) getSubPrice(ctx context.Context, userID int64, logPlace string) (int, error) {
+	price, err := s.CStory.GetSetting(ctx, models.SettingKeyPriceBasicSubscription)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", userID), zap.Any("place", logPlace))
+		return 0, errors.New(text_messages.TextErrorProcessPayment)
+	}
+
+	priceInt, err := strconv.Atoi(price)
+	if err != nil {
+		s.Logger.ZapLogger.Error("Atoi sub.basic.price", zap.Error(err), zap.Any("userID", userID), zap.Any("place", logPlace))
+		return 0, errors.New(text_messages.TextErrorProcessPayment)
+	}
+	return priceInt, nil
 }

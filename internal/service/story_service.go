@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 //go:generate mockgen -source=story_service.go -destination=mocks/mock.go
@@ -37,15 +38,17 @@ type StoryDatabase interface {
 
 	GetDailyLimit(ctx context.Context, userID int64) (*models.DailyLimit, error)
 	AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
-	UpdateDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
+	UpdateCountDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error
+	UpdateLimitCountDailyLimit(ctx context.Context, dailyLimit *models.DailyLimit) error
 
 	AddStoryMessages(ctx context.Context, tx pgx.Tx, msgs []*models.StoryMessage) error
 	GetAllStorySegments(ctx context.Context, storyID int) ([]*models.StoryMessage, error)
 
 	AddSubscription(ctx context.Context, subscription *models.Subscription) error
 	GetActiveSubscriptions(ctx context.Context, userID int64) ([]*models.Subscription, error)
-	GetPendingSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error)
-	UpdatePendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error
+	GetStatusSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error)
+	RejectedPendingSubscription(ctx context.Context, payload string, userID int64) error
+	PayedPendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error
 
 	GetAllSettings(ctx context.Context) ([]*models.Setting, error)
 	GetSetting(ctx context.Context, key string) (*models.Setting, error)
@@ -86,12 +89,6 @@ func NewStoryService(cfg *config.Config, db StoryDatabase, ai StoryAI, cache Sto
 
 func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	place := "CreateStory"
-	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
-	//TODO проверка на активную подписку
-	limit, err := s.checkDailyLimits(ctx, userID, place)
-	if err != nil {
-		return nil, err
-	}
 	// Проверяем, нет ли активных историй у пользователя в данный момент
 	stories, err := s.DBStory.GetActiveStories(ctx, userID)
 	if err != nil {
@@ -106,7 +103,11 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Warn("GetActiveStories", zap.Error(errors.New("client: user already has an active history")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorUserActiveStory)
 	}
-
+	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории + подписка
+	limit, err := s.checkDailyLimits(ctx, userID, place)
+	if err != nil {
+		return nil, err
+	}
 	// Запрос в ИИ
 	fantasyCharacters, err := s.AIStory.GetStructuredHeroes(ctx)
 	if err != nil {
@@ -124,7 +125,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	}
 	// Создание транзакции для консистентности данных
 	//создание контекста с таймаутом для изменения данных
-	//TODO выставить таймер для всей операции, но пока не получиться из-за ИИ(долгое выполнение)
+	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	tx, err := s.DBStory.BeginTx(ctxTimeout)
@@ -186,14 +187,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("Invalid user choice", zap.Error(err), zap.Any("userID", userID), zap.String("choice", num), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	//TODO проверка на активную подписку
-	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории
-	limit, err := s.checkDailyLimits(ctx, userID, place)
-	if err != nil {
-		return nil, err
-	}
-
-	// Получаем варианты (последний актвный storyVariant для пользователя)
+	// Получаем варианты (последний активный storyVariant для пользователя)
 	variants, err := s.DBStory.GetActiveVariants(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
@@ -207,6 +201,12 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(fmt.Errorf("server: no active story found")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории + подписка
+	limit, err := s.checkDailyLimits(ctx, userID, place)
+	if err != nil {
+		return nil, err
+	}
+
 	variant := variants[0]
 	storyID := variant.StoryID
 	var msg string
@@ -255,7 +255,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	narrative := segment.Narrative
 	choice := segment.Choices
 	//создание контекста с таймаутом для изменения данных
-	//TODO выставить таймер для всей операции, но пока не получиться из-за ИИ(долгое выполнение)
+	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	// Создание транзакции для консистентности данных
@@ -398,37 +398,70 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 
 func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
 	place := "ValidatePreCheckout"
-	ctxTimeout, cancel := context.WithTimeout(ctx, 6*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, pd.UserID)
+	price, err := s.getSubPrice(ctxTimeout, pd.UserID, place)
 	if err != nil {
-		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
-		return errors.New(text_messages.TextErrorProcessPayment)
+		return err
 	}
-	if len(subscriptions) > 1 {
-		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
-		return errors.New(text_messages.TextErrorProcessPayment)
-	}
-	if len(subscriptions) > 0 {
-		s.Logger.ZapLogger.Warn("GetActiveSubscriptions", zap.Error(fmt.Errorf("client: user already has active subscription")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
-		return errors.New(text_messages.TextAlreadyActiveSubscription)
-	}
-	sub, err := s.DBStory.GetPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
-	if err != nil {
-		//TODO В отдельном потоке сделать update состояния транзакции на reject
-		if strings.HasPrefix(err.Error(), "client: ") {
-			//сообщение об отсутствии данных pending sub
-			s.Logger.ZapLogger.Warn("GetPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+	g, ctxTimeout := errgroup.WithContext(ctxTimeout)
+	var subb *models.Subscription
+	//параллельно делаем запросы для получения данных транзакции(если есть хоть одна ошибка - помечаем статус транзакции на rejected)
+	g.Go(func() error {
+		subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, pd.UserID)
+		if err != nil {
+			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			return errors.New(text_messages.TextErrorProcessPayment)
+		}
+		if len(subscriptions) > 1 {
+			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(fmt.Errorf("server: more than one active subscription found")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			return errors.New(text_messages.TextErrorProcessPayment)
+		}
+		if len(subscriptions) > 0 {
+			s.Logger.ZapLogger.Warn("GetActiveSubscriptions", zap.Error(fmt.Errorf("client: user already has active subscription")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			return errors.New(text_messages.TextAlreadyActiveSubscription)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		sub, err := s.DBStory.GetStatusSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "client: ") {
+				s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+				return errors.New(text_messages.InvalidPaymentData)
+			}
+			s.Logger.ZapLogger.Error("GetStatusSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			return errors.New(text_messages.TextErrorProcessPayment)
+		}
+		subb = sub
+		if sub.Status == "rejected" {
+			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("Attempt to repeat send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 			return errors.New(text_messages.InvalidPaymentData)
 		}
-		s.Logger.ZapLogger.Error("GetPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
-		return errors.New(text_messages.TextErrorProcessPayment)
+		return nil
+	})
+	err = g.Wait()
+	if err != nil {
+		if subb.Status != "rejected" {
+			rejerr := s.DBStory.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
+			if rejerr != nil {
+				s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+				return errors.New(text_messages.TextErrorProcessPayment)
+			}
+		}
+		return err
 	}
-	if sub.Currency != pd.Currency || sub.Price != pd.TotalAmount {
-		//сообщение о некорректых данных при оплате
-		//TODO В отдельном потоке сделать update состояния транзакции на reject
+	//сверяем цены
+	if price != pd.TotalAmount {
+		s.Logger.ZapLogger.Warn("Check Subscription Price", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		err = s.DBStory.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
+		if err != nil {
+			s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			return errors.New(text_messages.TextErrorProcessPayment)
+		}
 		return errors.New(text_messages.InvalidPaymentData)
 	}
+	s.Logger.ZapLogger.Info("Subscription validated successfully", zap.Any("userID", pd.UserID), zap.Any("place", place))
 	return nil
 }
 
@@ -462,44 +495,53 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 	nameSub := text_messages.NameBasicSubscription
 
 	payload := fmt.Sprintf("%s_%s_%d_%d", nameSub, currencySubscription, userID, time.Now().Unix())
-	price, err := s.CStory.GetSetting(ctxTimeout, "sub.basic.price")
+	price, err := s.getSubPrice(ctxTimeout, userID, place)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to get subscription price from cache", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorProcessPayment)
+		return nil, err
 	}
-
-	priceInt, err := strconv.Atoi(price)
-	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to convert subscription price to int", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorProcessPayment)
-	}
-	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, priceInt)
+	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, price)
 	err = s.DBStory.AddSubscription(ctxTimeout, sub)
 	if err != nil {
-		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
 	}
-	s.Logger.ZapLogger.Info("Subscription pending successfully", zap.Any("userID", userID), zap.Any("place", place))
+	s.Logger.ZapLogger.Info("Subscription pending successfully", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("place", place))
 	return sub, nil
 }
 func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
 	place := "CommitSubscription"
-	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err := s.CStory.DeleteExceededLimit(ctxTimeout, pd.UserID)
-	if err != nil {
-		s.Logger.ZapLogger.Error("DeleteExceededLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
-		return errors.New(text_messages.TextErrorActivateSubscription)
-	}
-	//TODO добавить логику для изменения дневного лимита текущей даты
-	start := time.Now()
 	// Подписка на 30 дней
+	start := time.Now()
 	end := start.AddDate(0, 0, 30)
-	err = s.DBStory.UpdatePendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
+	err := s.DBStory.PayedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
+	premiumDayLimitStr, err := s.CStory.GetSetting(ctx, models.SettingKeyLimitPremiumDay)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorActivateSubscription)
+	}
+	premiumDayLimit, convErr := strconv.Atoi(premiumDayLimitStr)
+	if convErr != nil {
+		s.Logger.ZapLogger.Error("Atoi limit.day.premium", zap.Error(convErr), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorActivateSubscription)
+	}
+	err = s.CStory.DeleteExceededLimit(ctxTimeout, pd.UserID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("DeleteExceededLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorActivateSubscription)
+	}
+	limit := models.NewDailyLimit(pd.UserID, 0, premiumDayLimit)
+	err = s.DBStory.UpdateLimitCountDailyLimit(ctxTimeout, limit)
+	if err != nil {
+		s.Logger.ZapLogger.Error("UpdateLimitCountDailyLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+		return errors.New(text_messages.TextErrorActivateSubscription)
+	}
+	s.Logger.ZapLogger.Info("Subscription commited successfully", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 	return nil
 }
 
@@ -522,6 +564,7 @@ func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int
 
 	sub := subscriptions[0]
 	typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
+	s.Logger.ZapLogger.Info("Subscription received successfully", zap.Any("userID", userID), zap.Any("place", place))
 	return text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData), nil
 }
 
@@ -533,20 +576,21 @@ func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value str
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 	switch key {
-	case "sub.basic.price":
+	case models.SettingKeyPriceBasicSubscription:
 		price, err := strconv.Atoi(value)
 		if err != nil || price <= 0 {
 			s.Logger.ZapLogger.Warn("Invalid Price", zap.Any("key", key), zap.Any("place", place))
 			return "", errors.New(text_messages.TextErrorSettings)
 		}
 
-	case "limit.day.base":
+	case models.SettingKeyLimitBaseDay:
 		limit, err := strconv.Atoi(value)
 		if err != nil || limit < 0 {
 			s.Logger.ZapLogger.Warn("Invalid LimitDay", zap.Any("key", key), zap.Any("place", place))
 			return "", errors.New(text_messages.TextErrorSettings)
 		}
-	case "limit.day.adventure+":
+		//какой в жопу limit.day.adventure+, если там limit.day.premium
+	case models.SettingKeyLimitPremiumDay:
 		limit, err := strconv.Atoi(value)
 		if err != nil || limit < 0 {
 			s.Logger.ZapLogger.Warn("Invalid LimitDay", zap.Any("key", key), zap.Any("place", place))
@@ -575,7 +619,7 @@ func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value str
 
 	err = s.CStory.SetSetting(ctxTimeout, key, value)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to update cache after setting change", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("SetSetting", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
 		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
@@ -622,6 +666,7 @@ func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 	}
 
 	formattedMessage := text_messages.FormatSettingsComparison(cacheSettings, dbSettingsMap)
+	s.Logger.ZapLogger.Info("Setting received successfully", zap.Any("place", place))
 	return formattedMessage, nil
 }
 
@@ -631,12 +676,12 @@ func (s *StoryServiceImpl) RebootCacheData(ctx context.Context) error {
 	defer cancel()
 	settings, err := s.DBStory.GetAllSettings(ctxTimeout)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to get settings from Database", zap.Error(err), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("GetAllSettings", zap.Error(err), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorSettings)
 	}
 	err = s.CStory.LoadCacheData(ctxTimeout, settings)
 	if err != nil {
-		s.Logger.ZapLogger.Error("Failed to load settings into Cache", zap.Error(err), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("LoadCacheData", zap.Error(err), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorSettings)
 	}
 	s.Logger.ZapLogger.Info("Setting rebooted successfully", zap.Any("place", place))
