@@ -4,6 +4,8 @@ import (
 	"bot_story_generator/internal/config"
 	"bot_story_generator/internal/logger"
 	"context"
+	"crypto/tls"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -15,6 +17,9 @@ func NewDBObject(cfg *config.Config, logger *logger.Logger) (*DBObject, error) {
 	poolConfig, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
 		return nil, err
+	}
+	poolConfig.ConnConfig.TLSConfig = &tls.Config{
+		ServerName: strings.Split(poolConfig.ConnConfig.Host, ":")[0],
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {

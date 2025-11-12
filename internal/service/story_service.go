@@ -113,7 +113,6 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-	//TODO в юзер чойз че то подобное сделай
 	if len(fantasyCharacters.Characters) == 0 {
 		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(errors.New("empty response from AI")), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -123,9 +122,12 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
 	// Создание транзакции для консистентности данных
-	tx, err := s.DBStory.BeginTx(ctx)
+	//создание контекста с таймаутом для изменения данных
+	//TODO выставить таймер для всей операции, но пока не получиться из-за ИИ(долгое выполнение)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	tx, err := s.DBStory.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -133,10 +135,11 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 
 	// Создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
 	story := models.NewStory(userID, nil)
-	storyId, err := s.DBStory.AddStory(ctx, tx, story)
+	storyId, err := s.DBStory.AddStory(ctxTimeout, tx, story)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		//в случае отмены контекста(при завершении исполнения у нас может не сделаться rollback или commit транзакции - возможное решение использовать отдельный контекст для данных операций)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
@@ -145,10 +148,10 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 
 	// Создаем начальный вариант с данными из ИИ
 	variant := models.NewStoryVariant(storyId, "characters", data)
-	err = s.DBStory.AddVariant(ctx, tx, variant)
+	err = s.DBStory.AddVariant(ctxTimeout, tx, variant)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
@@ -156,15 +159,19 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	}
 
 	// Создаем начальный дневной лимит или обновляем(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
-	err = s.updateOrAddDailyLimit(ctx, tx, limit, 2, place)
+	err = s.updateOrAddDailyLimit(ctxTimeout, tx, limit, 2, place)
 	if err != nil {
 		return nil, err
 	}
 
 	// Делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты, лимиты)
-	err = s.DBStory.CommitTx(ctx, tx)
+	err = s.DBStory.CommitTx(ctxTimeout, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
+		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	//3 лог
@@ -228,10 +235,6 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("Unknown variant type", zap.String("type", variant.Type), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
-	//TODO генерим ответ ии - вынести в другую функцию потом
-	//* А зачем выносить в другую функцию? Вроде немного места занимает?
-
 	// Получаем все сегменты истории
 	allStory, err := s.DBStory.GetAllStorySegments(ctx, storyID)
 	if err != nil {
@@ -251,9 +254,12 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	narrative := segment.Narrative
 	choice := segment.Choices
-
+	//создание контекста с таймаутом для изменения данных
+	//TODO выставить таймер для всей операции, но пока не получиться из-за ИИ(долгое выполнение)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	// Создание транзакции для консистентности данных
-	tx, err := s.DBStory.BeginTx(ctx)
+	tx, err := s.DBStory.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -262,10 +268,10 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	newAssistantMsg := models.NewStoryMessage(storyID, narrative, "assistant")
 
 	// Сохраняем сообщения
-	err = s.DBStory.AddStoryMessages(ctx, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
+	err = s.DBStory.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddStoryMessages", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
@@ -276,7 +282,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	choicesData, err := json.Marshal(choice)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
@@ -284,9 +290,9 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
-	if err = s.DBStory.UpdateVariant(ctx, tx, addingVariant); err != nil {
+	if err = s.DBStory.UpdateVariant(ctxTimeout, tx, addingVariant); err != nil {
 		s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
 		}
@@ -294,15 +300,19 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	// Обновляем дневной лимит
-	err = s.updateOrAddDailyLimit(ctx, tx, limit, 1, place)
+	err = s.updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, place)
 	if err != nil {
 		return nil, err
 	}
 
 	// Делаем подтверждение транзакции после изменения таблиц
-	err = s.DBStory.CommitTx(ctx, tx)
+	err = s.DBStory.CommitTx(ctxTimeout, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("place", place))
+		}
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 
@@ -315,7 +325,9 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 
 func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) (string, error) {
 	place := "CreateUser"
-	isExist, err := s.CStory.CheckCreatedUser(ctx, userID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	isExist, err := s.CStory.CheckCreatedUser(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Warn("CheckCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 	} else if isExist {
@@ -327,11 +339,11 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) (string
 		s.Logger.ZapLogger.Info("CheckCreatedUser Created user not in cache. Trying creating in database...", zap.Any("userID", userID), zap.Any("place", place))
 	}
 	user := models.NewUser(userID)
-	err = s.DBStory.AddUser(ctx, user)
+	err = s.DBStory.AddUser(ctxTimeout, user)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "client: ") {
 			s.Logger.ZapLogger.Warn("AddUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
-			err := s.CStory.AddCreatedUser(ctx, userID)
+			err := s.CStory.AddCreatedUser(ctxTimeout, userID)
 			if err != nil {
 				s.Logger.ZapLogger.Warn("AddCreatedUser", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 			}
@@ -347,7 +359,9 @@ func (s *StoryServiceImpl) CreateUser(ctx context.Context, userID int64) (string
 
 func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) (string, error) {
 	place := "StopStory"
-	stories, err := s.DBStory.GetActiveStories(ctx, userID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	stories, err := s.DBStory.GetActiveStories(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorCreateTask)
@@ -370,7 +384,9 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 		return "", nil
 	}
 	place := "StopStoryChoice"
-	err := s.DBStory.StopStory(ctx, userID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := s.DBStory.StopStory(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorCreateTask)
@@ -382,7 +398,9 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 
 func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
 	place := "ValidatePreCheckout"
-	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, pd.UserID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, pd.UserID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorProcessPayment)
@@ -395,7 +413,7 @@ func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.P
 		s.Logger.ZapLogger.Warn("GetActiveSubscriptions", zap.Error(fmt.Errorf("client: user already has active subscription")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextAlreadyActiveSubscription)
 	}
-	sub, err := s.DBStory.GetPendingSubscription(ctx, pd.InvoicePayload, pd.UserID)
+	sub, err := s.DBStory.GetPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
 	if err != nil {
 		//TODO В отдельном потоке сделать update состояния транзакции на reject
 		if strings.HasPrefix(err.Error(), "client: ") {
@@ -418,7 +436,9 @@ func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.P
 // Проверяем, что нет активной подписки + добавляем в бд pending у подписки
 func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
 	place := "BuySubscription"
-	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
@@ -442,7 +462,7 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 	nameSub := text_messages.NameBasicSubscription
 
 	payload := fmt.Sprintf("%s_%s_%d_%d", nameSub, currencySubscription, userID, time.Now().Unix())
-	price, err := s.CStory.GetSetting(ctx, "sub.basic.price")
+	price, err := s.CStory.GetSetting(ctxTimeout, "sub.basic.price")
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get subscription price from cache", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
@@ -454,7 +474,7 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
 	}
 	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, priceInt)
-	err = s.DBStory.AddSubscription(ctx, sub)
+	err = s.DBStory.AddSubscription(ctxTimeout, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
@@ -464,7 +484,9 @@ func (s *StoryServiceImpl) BuySubscription(ctx context.Context, userID int64) (*
 }
 func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
 	place := "CommitSubscription"
-	err := s.CStory.DeleteExceededLimit(ctx, pd.UserID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := s.CStory.DeleteExceededLimit(ctxTimeout, pd.UserID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("DeleteExceededLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
@@ -473,7 +495,7 @@ func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.Pa
 	start := time.Now()
 	// Подписка на 30 дней
 	end := start.AddDate(0, 0, 30)
-	err = s.DBStory.UpdatePendingSubscription(ctx, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
+	err = s.DBStory.UpdatePendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
@@ -483,7 +505,9 @@ func (s *StoryServiceImpl) CommitSubscription(ctx context.Context, pd *models.Pa
 
 func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
 	place := "GetSubscriptionStatus"
-	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorGetSubscriptionStatus)
@@ -532,33 +556,39 @@ func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value str
 		s.Logger.ZapLogger.Warn("Unknown setting key", zap.Any("key", key), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
-	tx, err := s.DBStory.BeginTx(ctx)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	tx, err := s.DBStory.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 	setting := models.NewSetting(key, value, updatedBy)
-	err = s.DBStory.SetSetting(ctx, tx, setting)
+	err = s.DBStory.SetSetting(ctxTimeout, tx, setting)
 	if err != nil {
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
 		}
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	err = s.CStory.SetSetting(ctx, key, value)
+	err = s.CStory.SetSetting(ctxTimeout, key, value)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to update cache after setting change", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
-		rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
 		}
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	if err := s.DBStory.CommitTx(ctx, tx); err != nil {
+	if err := s.DBStory.CommitTx(ctxTimeout, tx); err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("key", key), zap.Any("place", place))
+		rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
+		if rollbackErr != nil {
+			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("place", place))
+		}
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
@@ -569,13 +599,15 @@ func (s *StoryServiceImpl) SetSetting(ctx context.Context, key string, value str
 
 func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 	place := "ViewSetting"
-	cacheSettings, err := s.getAllSettingsFromCache(ctx)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cacheSettings, err := s.getAllSettingsFromCache(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(err), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	dbSettings, err := s.getAllSettingsFromDB(ctx)
+	dbSettings, err := s.getAllSettingsFromDB(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get settings from database", zap.Error(err), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -595,12 +627,14 @@ func (s *StoryServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 
 func (s *StoryServiceImpl) RebootCacheData(ctx context.Context) error {
 	place := "RebootCacheData"
-	settings, err := s.DBStory.GetAllSettings(ctx)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	settings, err := s.DBStory.GetAllSettings(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get settings from Database", zap.Error(err), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorSettings)
 	}
-	err = s.CStory.LoadCacheData(ctx, settings)
+	err = s.CStory.LoadCacheData(ctxTimeout, settings)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to load settings into Cache", zap.Error(err), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorSettings)

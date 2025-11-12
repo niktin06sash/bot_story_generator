@@ -19,7 +19,7 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 		err = s.DBStory.AddDailyLimit(ctx, tx, limit)
 		if err != nil {
 			s.Logger.ZapLogger.Error("AddDailyLimit", zap.Error(err), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
-			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+			rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 			if rollbackErr != nil {
 				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			}
@@ -30,7 +30,7 @@ func (s *StoryServiceImpl) updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx,
 		err = s.DBStory.UpdateDailyLimit(ctx, tx, limit)
 		if err != nil {
 			s.Logger.ZapLogger.Error("UpdateDailyLimit", zap.Error(err), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
-			rollbackErr := s.DBStory.RollbackTx(ctx, tx)
+			rollbackErr := s.DBStory.RollbackTx(context.Background(), tx)
 			if rollbackErr != nil {
 				s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", limit.UserID), zap.Any("place", LogPlace))
 			}
