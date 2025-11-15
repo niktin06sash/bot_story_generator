@@ -368,7 +368,19 @@ func (r *StoryRouterImpl) routerWorker() {
 					r.cleanUserState(userID)
 					continue
 				}
-				resp, err := r.service.AdminCommandHandler(r.ctx, data)
+				// Обработка аргументов (пример аналогичный просмотру/изменению настроек)
+				if len(msg.Arguments) == 0 {
+					r.logger.ZapLogger.Error("Missing admin command arguments", zap.String("command", data), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "Не указаны параметры для команды")
+					r.cleanUserState(userID)
+					continue
+				}
+				r.logger.ZapLogger.Info("Admin executing command...", zap.Any("userID", userID), zap.String("command", data), zap.Any("arguments", msg.Arguments))
+				//* немного костыля
+				//* будем примать по примеру /command _ (nameSetting) 111111 XTR 11 (Value setting)
+				//* потому что принимает от бота только один аргумент
+				fullCmd := data + " " + msg.Arguments[0].ValueSetting
+				resp, err := r.service.AdminCommandHandler(r.ctx, fullCmd)
 				if err != nil {
 					r.logger.ZapLogger.Error("AdminCommandHandler failed", zap.String("command", data), zap.Error(err), zap.Any("userID", userID))
 					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при выполнении команды: "+err.Error())

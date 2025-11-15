@@ -75,6 +75,18 @@ var TextCommandForAdmin = []textCommandForHelp{
 		Command: "/rebootCache",
 		Text:    "♻️ Перезагрузка кэша",
 	},
+	{
+		Command: "/addsub",
+		Text:    "➕ Добавить подписку: добавляет новую подписку пользователю. Формат: addsub _ userID type currency price duration_days",
+	},
+	{
+		Command: "/updatesub",
+		Text:    "✏️ Обновить подписку: обновляет существующую подписку пользователя. Формат: updatesub _ userID duration_days",
+	},
+	{
+		Command: "/getsub",
+		Text:    "🔍 Посмотреть подписки: возвращает активные подписки пользователя. Формат: getsub _ userID",
+	},
 }
 
 // не будем конкретную ошибку писать в тг - просто сообщение-предупреждение

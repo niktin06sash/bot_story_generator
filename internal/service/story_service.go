@@ -796,7 +796,7 @@ func (s *StoryServiceImpl) AdminCommandHandler(ctx context.Context, command stri
 	case "addsub":
 		// Пример: addsub userID type currency price duration_days
 		if len(fields) != 6 {
-			return "❌ Формат: addsub userID type currency price duration_days", nil
+			return "❌ Формат: addsub _ userID type currency price duration_days", nil
 		}
 		userID, err1 := strconv.ParseInt(fields[1], 10, 64)
 		subType := fields[2]
@@ -810,7 +810,7 @@ func (s *StoryServiceImpl) AdminCommandHandler(ctx context.Context, command stri
 	case "updatesub":
 		// Пример: updatesub userID duration_days
 		if len(fields) != 3 {
-			return "❌ Формат: updatesub userID duration_days", nil
+			return "❌ Формат: updatesub _ userID duration_days", nil
 		}
 		userID, err1 := strconv.ParseInt(fields[1], 10, 64)
 		durationDays, err2 := strconv.Atoi(fields[2])
@@ -821,7 +821,7 @@ func (s *StoryServiceImpl) AdminCommandHandler(ctx context.Context, command stri
 	case "getsub":
 		// Пример: getsub userID
 		if len(fields) != 2 {
-			return "❌ Формат: getsub userID", nil
+			return "❌ Формат: getsub _ userID", nil
 		}
 		userID, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
