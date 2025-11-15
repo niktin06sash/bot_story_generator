@@ -549,6 +549,9 @@ func (s *StoryServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int
 	place := "GetSubscriptionStatus"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	// TODO добавить обновление лимита на обычный, когда подписка закончилась
+
 	subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
