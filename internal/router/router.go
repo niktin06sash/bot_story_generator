@@ -29,6 +29,8 @@ type StoryService interface {
 	SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error)
 	ViewSetting(ctx context.Context) (string, error)
 	RebootCacheData(ctx context.Context) error
+
+	AdminCommandHandler(ctx context.Context, command string) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -355,6 +357,24 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 
 				resp := text_messages.TextAdmin()
+				r.createOutboundMessage(r.ctx, userID, resp)
+				r.cleanUserState(userID)
+			
+			// Admin command handler for "addsub", "getsub", "updatesub"
+			} else if data == "addsub" || data == "getsub" || data == "updatesub" {
+				if !r.checkAdmin(userID) {
+					r.logger.ZapLogger.Warn("Unauthorized admin command attempt", zap.String("command", data), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand)
+					r.cleanUserState(userID)
+					continue
+				}
+				resp, err := r.service.AdminCommandHandler(r.ctx, data)
+				if err != nil {
+					r.logger.ZapLogger.Error("AdminCommandHandler failed", zap.String("command", data), zap.Error(err), zap.Any("userID", userID))
+					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при выполнении команды: "+err.Error())
+					r.cleanUserState(userID)
+					continue
+				}
 				r.createOutboundMessage(r.ctx, userID, resp)
 				r.cleanUserState(userID)
 

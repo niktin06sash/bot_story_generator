@@ -275,6 +275,42 @@ func (s *StoryDatabaseImpl) AddSubscription(ctx context.Context, subscription *m
 	}
 	return nil
 }
+
+// UpdateSubscription обновляет данные подписки пользователя
+func (s *StoryDatabaseImpl) UpdateSubscription(ctx context.Context, subscription *models.Subscription) error {
+	query := `
+		UPDATE subscriptions
+		SET
+			type = $1,
+			status = $2,
+			startDate = $3,
+			endDate = $4,
+			isAutoRenewal = $5,
+			currency = $6,
+			price = $7,
+			chargeId = $8
+		WHERE
+			payload = $9 AND userID = $10
+	`
+	_, err := s.databaseclient.Pool.Exec(ctx, query,
+		subscription.Type,
+		subscription.Status,
+		subscription.StartDate,
+		subscription.EndDate,
+		subscription.IsAutoRenewal,
+		subscription.Currency,
+		subscription.Price,
+		subscription.ChargeId,
+		subscription.Payload,
+		subscription.UserID,
+	)
+	if err != nil {
+		return fmt.Errorf("server: database error: %w", err)
+	}
+	return nil
+}
+
+
 func (s *StoryDatabaseImpl) GetStatusSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error) {
 	query := `
 		SELECT payload, userID, status
@@ -296,6 +332,7 @@ func (s *StoryDatabaseImpl) GetStatusSubscription(ctx context.Context, payload s
 	}
 	return sub, nil
 }
+
 func (s *StoryDatabaseImpl) PayedPendingSubscription(ctx context.Context, payload string, userID int64, start time.Time, end time.Time, changeID string) error {
 	query := `
 		UPDATE subscriptions 

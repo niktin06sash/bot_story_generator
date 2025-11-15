@@ -45,6 +45,7 @@ type StoryDatabase interface {
 	GetAllStorySegments(ctx context.Context, storyID int) ([]*models.StoryMessage, error)
 
 	AddSubscription(ctx context.Context, subscription *models.Subscription) error
+	UpdateSubscription(ctx context.Context, subscription *models.Subscription) error
 	GetActiveSubscriptions(ctx context.Context, userID int64) ([]*models.Subscription, error)
 	GetStatusSubscription(ctx context.Context, payload string, userID int64) (*models.Subscription, error)
 	RejectedPendingSubscription(ctx context.Context, payload string, userID int64) error
@@ -435,7 +436,7 @@ func (s *StoryServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.P
 		}
 		subb = sub
 		if sub.Status == "rejected" {
-			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("Attempt to repeat send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
+			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("attempt to repeat send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("place", place))
 			return errors.New(text_messages.InvalidPaymentData)
 		}
 		return nil
@@ -689,4 +690,173 @@ func (s *StoryServiceImpl) RebootCacheData(ctx context.Context) error {
 	}
 	s.Logger.ZapLogger.Info("Setting rebooted successfully", zap.Any("place", place))
 	return nil
+}
+
+// GetUserSubscription возвращает активную подписку пользователя по userID (если есть)
+func (s *StoryServiceImpl) GetUserSubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+	place := "GetUserSubscription"
+	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	subs, err := s.DBStory.GetActiveSubscriptions(ctxTimeout, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextErrorSettings)
+	}
+	if len(subs) == 0 {
+		return nil, nil // Нет активных подписок
+	}
+	return subs[0], nil // Возвращаем первую найденную активную подписку
+}
+
+// AddSubscriptionByAdmin добавляет новую подписку для пользователя по admin-команде
+func (s *StoryServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, subType, currency string, price int, durationDays int) (string, error) {
+	place := "AddSubscriptionByAdmin"
+	now := time.Now()
+	end := now.Add(time.Duration(durationDays) * 24 * time.Hour)
+
+	payload := fmt.Sprintf("adminmanual-%d-%d", userID, time.Now().UnixNano())
+	sub := &models.Subscription{
+		Payload:       payload,
+		ChargeId:      "adminmanual",
+		UserID:        userID,
+		Type:          subType,
+		Status:        "paid",
+		StartDate:     now,
+		EndDate:       end,
+		IsAutoRenewal: false,
+		Currency:      currency,
+		Price:         price,
+	}
+	
+	err := s.DBStory.AddSubscription(ctx, sub)
+	if err != nil {
+		s.Logger.ZapLogger.Error("AddSubscriptionByAdmin failed", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
+	}
+
+	s.Logger.ZapLogger.Info("Subscription added by admin", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("place", place))
+	return "Подписка успешно активирована этому пользователю.", nil
+}
+
+// UpdateSubscriptionByAdmin обновляет данные подписки пользователя по admin-команде, подгружая текущие данные из БД
+func (s *StoryServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int64, durationDays int) (string, error) {
+	place := "UpdateSubscriptionByAdmin"
+
+	// Получаем текущую подписку из БД
+	activeSubs, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+	if err != nil {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions failed", zap.Error(err), zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
+	}
+	if len(activeSubs) == 0 {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions: no such subscription", zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New("subscription with the specified data was not found")
+	}
+	curSub := activeSubs[0]
+	if curSub == nil {
+		s.Logger.ZapLogger.Error("GetActiveSubscriptions: subscription is nil", zap.Any("userID", userID), zap.Any("place", place))
+		return "", errors.New("subscription with the specified data was not found")
+	}
+
+	// Обновляем необходимые поля, остальные берём из текущей подписки
+	now := time.Now()
+	end := now.Add(time.Duration(durationDays) * 24 * time.Hour)
+
+	updatedSub := &models.Subscription{
+		Payload:       curSub.Payload,
+		UserID:        curSub.UserID,
+		Type:          curSub.Type,
+		Status:        "paid",
+		StartDate:     now,
+		EndDate:       end,
+		IsAutoRenewal: curSub.IsAutoRenewal,
+		Currency:      curSub.Currency,
+		Price:         curSub.Price,
+		ChargeId:      "adminmanual",
+	}
+
+	err = s.DBStory.UpdateSubscription(ctx, updatedSub)
+	if err != nil {
+		s.Logger.ZapLogger.Error("UpdateSubscriptionByAdmin failed", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", curSub.Payload), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
+	}
+
+	s.Logger.ZapLogger.Info("Subscription updated by admin", zap.Any("userID", userID), zap.Any("payload", curSub.Payload), zap.Any("place", place))
+	return "Данные подписки успешно обновлены для этого пользователя.", nil
+}
+
+// AdminCommandHandler обрабатывает строку команды для админ-действий (addsub, updatesub, getsub) и возвращает отчет.
+func (s *StoryServiceImpl) AdminCommandHandler(ctx context.Context, command string) (string, error) {
+	fields := strings.Fields(command)
+	if len(fields) < 1 {
+		return "❌ Команда не распознана. Используйте: addsub, updatesub, getsub", nil
+	}
+	switch fields[0] {
+	case "addsub":
+		// Пример: addsub userID type currency price duration_days
+		if len(fields) != 6 {
+			return "❌ Формат: addsub userID type currency price duration_days", nil
+		}
+		userID, err1 := strconv.ParseInt(fields[1], 10, 64)
+		subType := fields[2]
+		currency := fields[3]
+		price, err2 := strconv.Atoi(fields[4])
+		durationDays, err3 := strconv.Atoi(fields[5])
+		if err1 != nil || err2 != nil || err3 != nil {
+			return "❌ Ошибка в аргументах команды (userID, price, duration_days должны быть числами).", nil
+		}
+		return s.AdminAddSub(ctx, userID, subType, currency, price, durationDays)
+	case "updatesub":
+		// Пример: updatesub userID duration_days
+		if len(fields) != 3 {
+			return "❌ Формат: updatesub userID duration_days", nil
+		}
+		userID, err1 := strconv.ParseInt(fields[1], 10, 64)
+		durationDays, err2 := strconv.Atoi(fields[2])
+		if err1 != nil || err2 != nil {
+			return "❌ Ошибка в аргументах команды (userID, duration_days должны быть числами).", nil
+		}
+		return s.AdminUpdateSub(ctx, userID, durationDays)
+	case "getsub":
+		// Пример: getsub userID
+		if len(fields) != 2 {
+			return "❌ Формат: getsub userID", nil
+		}
+		userID, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return "❌ Ошибка в аргументе команды (userID должен быть числом).", nil
+		}
+		return s.AdminGetSub(ctx, userID)
+	default:
+		return "❌ Неизвестная команда. Возможные: addsub, updatesub, getsub", nil
+	}
+}
+
+// AdminAddSub добавляет подписку пользователю по данным из аргументов. Возвращает красивый отчет.
+func (s *StoryServiceImpl) AdminAddSub(ctx context.Context, userID int64, subType, currency string, price, durationDays int) (string, error) {
+	res, err := s.AddSubscriptionByAdmin(ctx, userID, subType, currency, price, durationDays)
+	if err != nil {
+		return "", err
+	}
+	return "✅ " + res, nil
+}
+
+// AdminUpdateSub обновляет текущую подписку пользователя на заданное количество дней. Возвращает красивый отчет.
+func (s *StoryServiceImpl) AdminUpdateSub(ctx context.Context, userID int64, durationDays int) (string, error) {
+	res, err := s.UpdateSubscriptionByAdmin(ctx, userID, durationDays)
+	if err != nil {
+		return "", err
+	}
+	return "✅ " + res, nil
+}
+
+// AdminGetSub возвращает активные подписки пользователя в красиво оформленном виде.
+func (s *StoryServiceImpl) AdminGetSub(ctx context.Context, userID int64) (string, error) {
+	subs, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	
+	return text_messages.FormatActiveSubscriptionsText(subs), nil
 }

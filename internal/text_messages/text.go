@@ -382,3 +382,19 @@ func FormatSettingsComparison(cacheSettings map[string]string, dbSettings map[st
 	resp += Divider
 	return resp
 }
+
+func FormatActiveSubscriptionsText(subs []*models.Subscription) string {
+	if len(subs) == 0 {
+		return "У пользователя нет активных подписок."
+	}
+	resp := "📦 Активные подписки пользователя:\n"
+	for i, sub := range subs {
+		resp += fmt.Sprintf("\n№%d:\n", i+1)
+		resp += fmt.Sprintf("Тип: %s\n", sub.Type)
+		resp += fmt.Sprintf("Старт: %s\n", sub.StartDate.Format("2006-01-02"))
+		resp += fmt.Sprintf("Окончание: %s\n", sub.EndDate.Format("2006-01-02"))
+		resp += fmt.Sprintf("Цена: %d %s\n", sub.Price, sub.Currency)
+		resp += fmt.Sprintf("Статус: %s\n", sub.Status)
+	}
+	return resp
+}
