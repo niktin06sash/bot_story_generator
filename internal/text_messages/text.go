@@ -92,6 +92,9 @@ var TextCommandForAdmin = []textCommandForHelp{
 // не будем конкретную ошибку писать в тг - просто сообщение-предупреждение
 var TextErrorSettings = "Ошибка при взаимодействии с данными настройки. Проверьте логи!"
 var TextSuccessSetSetting = "Настройка успешно изменена"
+var SuccessActivateSub = "Подписка успешно активирована пользователю: %v"
+var SuccessUpdateSub = "Подписка успешно обновлена пользователю: %v"
+var SuccessRebootCache = "Кэш успешно перезагружен"
 
 // здесь сплита нет - передается единое сообщение
 var TextStartCreateHero = `

@@ -54,10 +54,10 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 	// Проверяем в базе данных, есть ли дневные ходы у пользователя для создания новой истории
 	var limitv *models.DailyLimit
 	var subb *models.Subscription
-	g, ctx := errgroup.WithContext(ctx)
+	g, ctxG := errgroup.WithContext(ctx)
 	//параллельно делаем запросы для получения данных дневного лимита и подписки(если есть хоть одна ошибка - прекращаем выполнение)
 	g.Go(func() error {
-		limit, err := s.DBStory.GetDailyLimit(ctx, userID)
+		limit, err := s.DBStory.GetDailyLimit(ctxG, userID)
 		if err != nil {
 			s.Logger.ZapLogger.Error("GetDailyLimit", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
 			return errors.New(text_messages.TextErrorCreateTask)
@@ -66,7 +66,7 @@ func (s *StoryServiceImpl) checkDailyLimits(ctx context.Context, userID int64, L
 		return nil
 	})
 	g.Go(func() error {
-		subscriptions, err := s.DBStory.GetActiveSubscriptions(ctx, userID)
+		subscriptions, err := s.DBStory.GetActiveSubscriptions(ctxG, userID)
 		if err != nil {
 			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("place", LogPlace))
 			return errors.New(text_messages.TextErrorCreateTask)

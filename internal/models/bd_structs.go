@@ -122,17 +122,18 @@ type Setting struct {
 // NewSetting создает новую настройку
 func NewSetting(key string, value string, updatedBy int64) *Setting {
 	return &Setting{
-		Key:   key,
-		Value: value,
+		Key:       key,
+		Value:     value,
 		UpdatedBy: updatedBy,
 	}
 }
 
+//исправь их
 // начальные ключи настроек
 const (
 	SettingKeyPriceBasicSubscription = "sub.basic.price"
-	SettingKeyLimitBaseDay = "limit.day.base"
-	SettingKeyLimitPremiumDay = "limit.day.premium"
+	SettingKeyLimitBaseDay           = "limit.day.base"
+	SettingKeyLimitPremiumDay        = "limit.day.premium"
 )
 
 func NameSettingKeys() []string {

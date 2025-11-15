@@ -28,7 +28,7 @@ type StoryService interface {
 
 	SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error)
 	ViewSetting(ctx context.Context) (string, error)
-	RebootCacheData(ctx context.Context) error
+	RebootCacheData(ctx context.Context) (string, error)
 
 	AdminCommandHandler(ctx context.Context, command string) (string, error)
 }
@@ -299,7 +299,6 @@ func (r *StoryRouterImpl) routerWorker() {
 
 				resp, err := r.service.SetSetting(r.ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID)
 				if err != nil {
-					r.logger.ZapLogger.Error("Failed to change setting", zap.Error(err), zap.Any("userID", userID), zap.Any("setting", msg.Arguments[0].NameSetting))
 					r.createOutboundMessage(r.ctx, userID, err.Error())
 				} else {
 					r.createOutboundMessage(r.ctx, userID, resp)
@@ -318,8 +317,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				r.logger.ZapLogger.Info("Admin viewing settings...", zap.Any("userID", userID))
 				formattedMessage, err := r.service.ViewSetting(r.ctx)
 				if err != nil {
-					r.logger.ZapLogger.Error("Failed to view settings", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при получении данных: "+err.Error())
+					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
@@ -337,14 +335,13 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.logger.ZapLogger.Info("Admin rebooting cache...", zap.Any("userID", userID))
-				err := r.service.RebootCacheData(r.ctx)
+				resp, err := r.service.RebootCacheData(r.ctx)
 				if err != nil {
-					r.logger.ZapLogger.Error("Failed to reboot cache", zap.Error(err), zap.Any("userID", userID))
-					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при перезагрузке кэша: "+err.Error())
+					r.createOutboundMessage(r.ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, "Кэш успешно перезагружен")
+				r.createOutboundMessage(r.ctx, userID, resp)
 				r.cleanUserState(userID)
 
 			} else if data == "admin" {
@@ -359,8 +356,8 @@ func (r *StoryRouterImpl) routerWorker() {
 				resp := text_messages.TextAdmin()
 				r.createOutboundMessage(r.ctx, userID, resp)
 				r.cleanUserState(userID)
-			
-			// Admin command handler for "addsub", "getsub", "updatesub"
+
+				// Admin command handler for "addsub", "getsub", "updatesub"
 			} else if data == "addsub" || data == "getsub" || data == "updatesub" {
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized admin command attempt", zap.String("command", data), zap.Any("userID", userID))
@@ -382,7 +379,6 @@ func (r *StoryRouterImpl) routerWorker() {
 				fullCmd := data + " " + msg.Arguments[0].ValueSetting
 				resp, err := r.service.AdminCommandHandler(r.ctx, fullCmd)
 				if err != nil {
-					r.logger.ZapLogger.Error("AdminCommandHandler failed", zap.String("command", data), zap.Error(err), zap.Any("userID", userID))
 					r.createOutboundMessage(r.ctx, userID, "⚠️ Ошибка при выполнении команды: "+err.Error())
 					r.cleanUserState(userID)
 					continue

@@ -117,6 +117,7 @@ func (bot *Bot) readIncommingMessage() {
 				userID := query.From.ID
 				amount := query.TotalAmount
 				currency := query.Currency
+				//1 лог
 				bot.logger.ZapLogger.Info("Received PreCheckout query", zap.Any("userID", userID), zap.Any("payload", payload))
 				bot.router.AddPaymentQuery(bot.ctx, userID, payload, id, amount, currency, "")
 				continue
@@ -131,7 +132,7 @@ func (bot *Bot) readIncommingMessage() {
 				payload := payment.InvoicePayload
 				amount := payment.TotalAmount
 				currency := payment.Currency
-				//chargeID := payment.ProviderPaymentChargeID // Уникальный идентификатор чека (charge_id) от платежного провайдера
+				//1 лог
 				bot.logger.ZapLogger.Info("Received successful payment", zap.Any("userID", userID), zap.Any("payload", payload))
 				bot.router.AddPaymentQuery(bot.ctx, userID, payload, "", amount, currency, chargeID)
 				continue
@@ -154,38 +155,21 @@ func (bot *Bot) readIncommingMessage() {
 					//1 лог
 					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text))
 					command := update.Message.Command()
-
-					// parse arguments after command
-					var arguments []models.Argument
+					//передаем обновление: /changeSetting limit.day.premium=20
 					parts := strings.Fields(text)
 					if len(parts) > 1 {
-						// tokens after command
+						var arguments []models.Argument
 						tokens := parts[1:]
-						// support formats:
-						// /cmd key=value
-						// /cmd key:value
-						// /cmd key value
-						if len(tokens) == 1 {
-							t := tokens[0]
+						for _, t := range tokens {
 							if strings.Contains(t, "=") {
 								kv := strings.SplitN(t, "=", 2)
 								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
-							} else if strings.Contains(t, ":") {
-								kv := strings.SplitN(t, ":", 2)
-								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
-							} else {
-								// single token without separator — treat as key with empty value
-								arguments = append(arguments, models.Argument{NameSetting: t, ValueSetting: ""})
 							}
-						} else {
-							// first token is key, the rest is value (allows spaces in value)
-							key := tokens[0]
-							value := strings.Join(tokens[1:], " ")
-							arguments = append(arguments, models.Argument{NameSetting: key, ValueSetting: value})
 						}
+						bot.router.AddComand(bot.ctx, command, userID, msgID, arguments)
+					} else {
+						bot.router.AddComand(bot.ctx, command, userID, msgID, nil)
 					}
-
-					bot.router.AddComand(bot.ctx, command, userID, msgID, arguments)
 				} else {
 					//обычные сообщения также игнорируются
 					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
@@ -521,7 +505,7 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 		provideToken = ""
 		startParameter = ""
 	}
-	// Диагностика: логируем сумму и userID
+	// Диагностика: логируем сумму и userID - диагноз: у вас аутизм)
 	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("currency", sub.Currency))
 
 	if sub.Price <= 0 {

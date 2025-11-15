@@ -64,7 +64,7 @@ func (s *StoryCacheImpl) LoadCacheData(ctx context.Context, settings []*models.S
 		return errors.New("settings is nil")
 	}
 	allName := models.NameSettingKeys()
-	// Записываем каждую настройку в Redis с ключом settings:<key>
+	// Записываем каждую настройку в Redis с ключом settings:%s<key>
 	for _, st := range settings {
 		key := fmt.Sprintf(s.cacheclient.SettingsKey, st.Key)
 		// Сохраняем значение как строку без TTL (пока)
