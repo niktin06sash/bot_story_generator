@@ -127,7 +127,7 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 	// Создание транзакции для консистентности данных
 	//создание контекста с таймаутом для изменения данных
 	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
-	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	tx, err := s.DBStory.BeginTx(ctxTimeout)
 	if err != nil {

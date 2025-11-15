@@ -34,8 +34,10 @@ func NewAIConnection(cfg *config.Config, logger *logger.Logger, model string) (*
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(httpClient),
 		option.WithMiddleware(func(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-			req.URL.Scheme = "http"
-			req.URL.Host = "localhost:1234"
+			// Use OpenRouter endpoint instead of local LM Studio
+			req.URL.Scheme = "https"
+			req.URL.Host = "openrouter.ai"
+			req.URL.Path = "/api/v1/chat/completions"
 			return next(req)
 		}),
 	)
