@@ -5,7 +5,7 @@ CREATE TABLE settings (
     updated_by BIGINT NOT NULL
 );
 
-INSERT INTO settings (key, value) VALUES
+INSERT INTO settings (key, value, updated_by) VALUES
     ('sub.basic.price', '1', 0),
     ('limit.day.base', '10', 0),
     ('limit.day.premium', '1000', 0);
