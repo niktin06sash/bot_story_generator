@@ -3,33 +3,38 @@ package models
 import (
 	"context"
 
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/invopop/jsonschema"
 )
 
-func NewIncommingMessage(data string, userID int64, msgID int, agrs []Argument) IncommingMessage {
-	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID, Arguments: agrs}
+func NewIncommingMessage(data string, userID int64, msgID int, agrs []Argument, trace Trace) IncommingMessage {
+	return IncommingMessage{Data: data, UserID: userID, MsgID: msgID, Arguments: agrs, Trace: trace}
 }
 
 type Argument struct {
-	NameSetting string
-	ValueSetting  string
+	NameSetting  string
+	ValueSetting string
 }
 
 type IncommingMessage struct {
-	Data   string
-	UserID int64
-	MsgID  int
+	Data      string
+	UserID    int64
+	MsgID     int
 	Arguments []Argument
+	Trace     Trace
 }
 
-func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
-	return OutboundMessage{Ctx: ctx, UserID: userId, Text: text, ButtonArgs: buttonArgs}
+func NewOutboundMessage(ctx context.Context, userId int64, text string, trace Trace, buttonArgs ...ButtonArg) OutboundMessage {
+	return OutboundMessage{Ctx: ctx, UserID: userId, Text: text, ButtonArgs: buttonArgs, Trace: trace}
 }
 
 type OutboundMessage struct {
 	Ctx        context.Context
 	UserID     int64
 	Text       string
+	Trace      Trace
 	ButtonArgs []ButtonArg
 }
 
@@ -42,24 +47,26 @@ func NewButtonArg(btn string, args []string) ButtonArg {
 	return ButtonArg{ButtonName: btn, Args: args}
 }
 
-func NewEditMessage(userID int64, msgID int, text string, buttonArgs ...ButtonArg) EditMessage {
-	return EditMessage{UserID: userID, MsgID: msgID, ButtonArgs: buttonArgs, Text: text}
+func NewEditMessage(userID int64, msgID int, text string, trace Trace, buttonArgs ...ButtonArg) EditMessage {
+	return EditMessage{UserID: userID, MsgID: msgID, ButtonArgs: buttonArgs, Text: text, Trace: trace}
 }
 
 type EditMessage struct {
 	UserID     int64
 	MsgID      int
 	Text       string
+	Trace      Trace
 	ButtonArgs []ButtonArg
 }
 
 type DeleteMessage struct {
 	UserID int64
 	MsgID  int
+	Trace  Trace
 }
 
-func NewDeleteMessage(userID int64, msgID int) DeleteMessage {
-	return DeleteMessage{UserID: userID, MsgID: msgID}
+func NewDeleteMessage(userID int64, msgID int, trace Trace) DeleteMessage {
+	return DeleteMessage{UserID: userID, MsgID: msgID, Trace: trace}
 }
 
 // GenerateSchema генерирует JSON схему для типа T
@@ -115,12 +122,14 @@ type Extension struct {
 // InvoiceMessage
 type InvoiceMessage struct {
 	Subscription *Subscription
+	Trace        Trace
 }
 
 // NewInvoiceMessage создает invoice с указанным chatID
-func NewInvoiceMessage(sub *Subscription) InvoiceMessage {
+func NewInvoiceMessage(sub *Subscription, trace Trace) InvoiceMessage {
 	return InvoiceMessage{
 		Subscription: sub,
+		Trace:        trace,
 	}
 }
 
@@ -133,10 +142,11 @@ type PaymentData struct {
 	TotalAmount    int
 	ChargeID       string
 	Error          error
+	Trace          Trace
 }
 
 // NewPaymentData создает новые данные платежа
-func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount int, userid int64, chargeId string) *PaymentData {
+func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount int, userid int64, chargeId string, trace Trace) *PaymentData {
 	return &PaymentData{
 		QueryID:        queryID,
 		Currency:       currency,
@@ -144,5 +154,18 @@ func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount
 		TotalAmount:    totalAmount,
 		UserID:         userid,
 		ChargeID:       chargeId,
+		Trace:          trace,
+	}
+}
+
+type Trace struct {
+	ID        string
+	StartTime time.Time
+}
+
+func NewTrace() Trace {
+	return Trace{
+		ID:        uuid.NewString(),
+		StartTime: time.Now(),
 	}
 }

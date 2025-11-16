@@ -28,8 +28,8 @@ type Bot struct {
 }
 
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument)
-	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string)
+	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument, trace models.Trace)
+	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string, trace models.Trace)
 	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData)
 	CloseInputChans()
 }
@@ -105,6 +105,8 @@ func (bot *Bot) readIncommingMessage() {
 			if !ok {
 				return
 			}
+			//executionTime у лога пишем только при отправке действия в ТГ-АПИ
+			trace := models.NewTrace()
 			// Обработка pre-checkout запроса для платежей (Stars/XTR)
 			// PreCheckoutQuery обрабатывается в боте, так как это системный запрос Telegram API
 			//обратиться за проверкой существования заказа в базу данных
@@ -118,8 +120,8 @@ func (bot *Bot) readIncommingMessage() {
 				amount := query.TotalAmount
 				currency := query.Currency
 				//1 лог
-				bot.logger.ZapLogger.Info("Received PreCheckout query", zap.Any("userID", userID), zap.Any("payload", payload))
-				bot.router.AddPaymentQuery(bot.ctx, userID, payload, id, amount, currency, "")
+				bot.logger.ZapLogger.Info("Received PreCheckout query", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID))
+				bot.router.AddPaymentQuery(bot.ctx, userID, payload, id, amount, currency, "", trace)
 				continue
 			}
 			//можно будет раскидать по отдельным каналам precheck и successPayment
@@ -133,8 +135,8 @@ func (bot *Bot) readIncommingMessage() {
 				amount := payment.TotalAmount
 				currency := payment.Currency
 				//1 лог
-				bot.logger.ZapLogger.Info("Received successful payment", zap.Any("userID", userID), zap.Any("payload", payload))
-				bot.router.AddPaymentQuery(bot.ctx, userID, payload, "", amount, currency, chargeID)
+				bot.logger.ZapLogger.Info("Received successful payment", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID))
+				bot.router.AddPaymentQuery(bot.ctx, userID, payload, "", amount, currency, chargeID, trace)
 				continue
 			}
 
@@ -143,8 +145,8 @@ func (bot *Bot) readIncommingMessage() {
 				userID := update.CallbackQuery.From.ID
 				msgID := update.CallbackQuery.Message.MessageID
 				//1 лог
-				bot.logger.ZapLogger.Info("Received CallbackQuery", zap.Any("userID", userID), zap.Any("data", data))
-				bot.router.AddComand(bot.ctx, data, userID, msgID, nil)
+				bot.logger.ZapLogger.Info("Received CallbackQuery", zap.Any("userID", userID), zap.Any("data", data), zap.Any("traceID", trace.ID))
+				bot.router.AddComand(bot.ctx, data, userID, msgID, nil, trace)
 				bot.api.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 			} else if update.Message != nil {
 				text := update.Message.Text
@@ -153,7 +155,7 @@ func (bot *Bot) readIncommingMessage() {
 				msgID := msg.MessageID
 				if msg.IsCommand() {
 					//1 лог
-					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text))
+					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text), zap.Any("traceID", trace.ID))
 					command := update.Message.Command()
 					//передаем обновление: /changeSetting limit.day.premium=20
 					parts := strings.Fields(text)
@@ -166,13 +168,14 @@ func (bot *Bot) readIncommingMessage() {
 								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
 							}
 						}
-						bot.router.AddComand(bot.ctx, command, userID, msgID, arguments)
+						bot.router.AddComand(bot.ctx, command, userID, msgID, arguments, trace)
 					} else {
-						bot.router.AddComand(bot.ctx, command, userID, msgID, nil)
+						bot.router.AddComand(bot.ctx, command, userID, msgID, nil, trace)
 					}
 				} else {
 					//обычные сообщения также игнорируются
-					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil)
+					bot.logger.ZapLogger.Info("Received Message", zap.Any("userID", userID), zap.Any("data", text), zap.Any("traceID", trace.ID))
+					bot.sendMessage(userID, text_messages.TextUnknownCommand, nil, trace)
 				}
 			}
 		}
@@ -188,7 +191,7 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 			if !ok {
 				return
 			}
-
+			trace := editMsg.Trace
 			var keyboard tgbotapi.InlineKeyboardMarkup
 			if len(editMsg.ButtonArgs) > 0 {
 				var rows [][]tgbotapi.InlineKeyboardButton
@@ -226,6 +229,8 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 					zap.Error(err),
 					zap.Any("userID", editMsg.UserID),
 					zap.Any("msgID", editMsg.MsgID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 				continue
 			}
@@ -234,6 +239,8 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 				"Message edited successfully",
 				zap.Any("userID", editMsg.UserID),
 				zap.Any("msgID", editMsg.MsgID),
+				zap.Any("traceID", trace.ID),
+				zap.Any("executionTime", time.Since(trace.StartTime)),
 			)
 		}
 	}
@@ -248,6 +255,7 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 			if !ok {
 				return
 			}
+			trace := deleteMsg.Trace
 			del := tgbotapi.NewDeleteMessage(deleteMsg.UserID, deleteMsg.MsgID)
 			_, err := bot.api.Request(del)
 			if err != nil {
@@ -256,6 +264,8 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 					zap.Error(err),
 					zap.Any("userID", deleteMsg.UserID),
 					zap.Any("msgID", deleteMsg.MsgID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 				continue
 			}
@@ -264,21 +274,25 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 				"Message deleted successfully",
 				zap.Any("userID", deleteMsg.UserID),
 				zap.Any("msgID", deleteMsg.MsgID),
+				zap.Any("traceID", trace.ID),
+				zap.Any("executionTime", time.Since(trace.StartTime)),
 			)
 
 		}
 	}
 }
-func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string) int {
+func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string, trace models.Trace) int {
 	bot.mux.Lock()
 	msgId, ok := bot.payload_msgId[payload]
 	if !ok {
 		bot.mux.Unlock()
 		//если в мапе нет ключа по payload - делаем запрос на ошибку checkoutQuery с единым ответом ошибки
-		bot.logger.ZapLogger.Error("Invoice's messageID for payload not found", zap.Any("userID", userID), zap.String("payload", payload))
+		bot.logger.ZapLogger.Error("Invoice's messageID for payload not found", zap.Any("userID", userID), zap.String("payload", payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 		_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": queryId, "ok": "false", "error_message": text_messages.TextErrorProcessPayment})
 		if err != nil {
-			bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", payload))
+			bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
+		} else {
+			bot.logger.ZapLogger.Info("Made false-request to invoice successfully", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 		}
 		return 0
 	}
@@ -296,44 +310,50 @@ func (bot *Bot) sendPaymentData(ch chan *models.PaymentData) {
 			if !ok {
 				return
 			}
+			trace := data.Trace
 			if data.Error != nil && data.ChargeID == "" && data.QueryID != "" {
-				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID)
+				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID, trace)
 				if msgId == 0 {
 					continue
 				}
-				bot.logger.ZapLogger.Warn("Invalid payment data", zap.Any("queryID", data.QueryID), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 				//если в мапе есть ключ по payload - делаем запрос на ошибку checkoutQuery которая произошла в сервисе
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "false", "error_message": data.Error.Error()})
 				if err != nil {
-					bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+					bot.logger.ZapLogger.Error("Failed to make request with Invalid payment data", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
+				} else {
+					bot.logger.ZapLogger.Info("Made false-request to invoice successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				}
 				//удаляем invoice сообщение
 				del := tgbotapi.NewDeleteMessage(data.UserID, msgId)
 				_, err = bot.api.Request(del)
 				if err != nil {
-					bot.logger.ZapLogger.Error("Failed to delete invoice message", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+					bot.logger.ZapLogger.Error("Failed to delete invoice message", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
+				} else {
+					bot.logger.ZapLogger.Info("Invoice message deleted successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				}
 			} else if data.Error == nil && data.ChargeID == "" && data.QueryID != "" {
-				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID)
+				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID, trace)
 				if msgId == 0 {
 					continue
 				}
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "true"})
 				if err != nil {
 					bot.logger.ZapLogger.Error("Failed to answer pre-checkout query", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
+				} else {
+					bot.logger.ZapLogger.Info("Made true-request to invoice successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				}
 				//удаляем invoice сообщение
 				del := tgbotapi.NewDeleteMessage(data.UserID, msgId)
 				_, err = bot.api.Request(del)
 				if err != nil {
 					bot.logger.ZapLogger.Error("Failed to delete invoice message", zap.Error(err), zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
-					continue
+				} else {
+					bot.logger.ZapLogger.Info("Invoice message deleted successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				}
-				bot.logger.ZapLogger.Info("Pre-checkout query answered successfully", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload))
 			} else if data.Error != nil && data.ChargeID != "" && data.QueryID == "" {
-				bot.sendMessage(data.UserID, data.Error.Error(), nil)
+				bot.sendMessage(data.UserID, data.Error.Error(), nil, trace)
 			} else if data.Error == nil && data.ChargeID != "" && data.QueryID == "" {
-				bot.sendMessage(data.UserID, text_messages.TextSubscriptionActivated, nil)
+				bot.sendMessage(data.UserID, text_messages.TextSubscriptionActivated, nil, trace)
 			}
 		}
 	}
@@ -349,7 +369,7 @@ func (bot *Bot) sendInvoiceMessage(ch chan models.InvoiceMessage) {
 			}
 
 			//bot.sendMessage(msg.Subscription.UserID, text_messages.TextSendInvoiceSubscription, nil)
-			bot.sendSubscriptionInvoice(msg.Subscription)
+			bot.sendSubscriptionInvoice(msg.Subscription, msg.Trace)
 		}
 	}
 }
@@ -363,6 +383,7 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 			if !ok {
 				return
 			}
+			trace := outMsg.Trace
 			var text []string
 			if strings.Contains(outMsg.Text, "---") {
 				parts := strings.Split(outMsg.Text, "---")
@@ -373,7 +394,7 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 			} else {
 				text = []string{strings.TrimSpace(outMsg.Text)}
 			}
-			msg, err := bot.sendMessage(outMsg.UserID, text[0], outMsg.ButtonArgs)
+			msg, err := bot.sendMessage(outMsg.UserID, text[0], outMsg.ButtonArgs, trace)
 			if err != nil {
 				continue
 			}
@@ -385,21 +406,21 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 			}
 			isDelete, ok := value.(string)
 			if !ok {
-				bot.logger.ZapLogger.Warn("Context value for 'delete' is not a string", zap.Any("value", value))
+				bot.logger.ZapLogger.Warn("Context value for 'delete' is not a string", zap.Any("value", value), zap.Any("userID", outMsg.UserID), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				continue
 			}
 			if isDelete == "1" {
 				bot.wg.Add(1)
 				go func() {
 					defer bot.wg.Done()
-					bot.waitingMessageWithAnimation(localctx, msg, outMsg.UserID, text)
+					bot.waitingMessageWithAnimation(localctx, msg, outMsg.UserID, text, trace)
 				}()
 			}
 		}
 	}
 }
 
-func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg) (tgbotapi.Message, error) {
+func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg, trace models.Trace) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(userID, text)
 	if len(butarg) > 0 {
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -419,6 +440,8 @@ func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg
 			"Failed to send message",
 			zap.Error(err),
 			zap.Any("userID", userID),
+			zap.Any("traceID", trace.ID),
+			zap.Any("executionTime", time.Since(trace.StartTime)),
 		)
 		return sentmsg, err
 	}
@@ -426,12 +449,14 @@ func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg
 		"Message sent successfully",
 		zap.Any("userID", userID),
 		zap.Any("msgID", sentmsg.MessageID),
+		zap.Any("traceID", trace.ID),
+		zap.Any("executionTime", time.Since(trace.StartTime)),
 	)
 
 	return sentmsg, nil
 }
 
-func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string) {
+func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string, trace models.Trace) {
 	currentIdx := 1
 	if len(inputText) == 1 {
 		currentIdx = 0
@@ -449,12 +474,16 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 					zap.Error(err),
 					zap.Any("userID", userID),
 					zap.Any("msgID", sentMsg.MessageID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 			} else {
 				bot.logger.ZapLogger.Info(
 					"Loading message deleted successfully",
 					zap.Any("userID", userID),
 					zap.Any("msgID", sentMsg.MessageID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 			}
 			return
@@ -467,12 +496,16 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 					zap.Error(err),
 					zap.Any("userID", userID),
 					zap.Any("msgID", sentMsg.MessageID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 			} else {
 				bot.logger.ZapLogger.Info(
 					"Loading message deleted successfully",
 					zap.Any("userID", userID),
 					zap.Any("msgID", sentMsg.MessageID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 			}
 			return
@@ -485,6 +518,8 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 					zap.Error(err),
 					zap.Any("userID", userID),
 					zap.Any("msgID", sentMsg.MessageID),
+					zap.Any("traceID", trace.ID),
+					zap.Any("executionTime", time.Since(trace.StartTime)),
 				)
 			}
 			currentIdx = (currentIdx + 1) % len(inputText)
@@ -493,7 +528,7 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 }
 
 // * Функция отправки инвойса с подпиской
-func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
+func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription, trace models.Trace) {
 	name := text_messages.NameBasicSubscription
 	description := text_messages.DescriptionBasicSubscription
 	var provideToken string
@@ -506,11 +541,11 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 		startParameter = ""
 	}
 	// Диагностика: логируем сумму и userID - диагноз: у вас аутизм)
-	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("currency", sub.Currency))
+	bot.logger.ZapLogger.Info("Subscription invoice prepare", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 
 	if sub.Price <= 0 {
-		bot.logger.ZapLogger.Warn("Subscription price is zero or negative, aborting invoice send", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload))
-		_, _ = bot.api.Send(tgbotapi.NewMessage(sub.UserID, "Ошибка: сумма подписки не настроена. Пожалуйста, свяжитесь с поддержкой."))
+		bot.logger.ZapLogger.Warn("Subscription price is zero or negative, aborting invoice send", zap.Any("amount", sub.Price), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
+		bot.sendMessage(sub.UserID, text_messages.TextSubPriceError, nil, trace)
 		return
 	}
 
@@ -533,9 +568,9 @@ func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription) {
 	invoice.SuggestedTipAmounts = []int{}
 	msg, err := bot.api.Send(invoice)
 	if err != nil {
-		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload))
+		bot.logger.ZapLogger.Error("Error sending invoice", zap.Error(err), zap.Any("userID", sub.UserID), zap.Any("payload", sub.Payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 	} else {
-		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID), zap.Any("payload", sub.Payload))
+		bot.logger.ZapLogger.Info("Invoice sent", zap.Any("userID", sub.UserID), zap.Any("msgID", msg.MessageID), zap.Any("payload", sub.Payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 		bot.mux.Lock()
 		bot.payload_msgId[sub.Payload] = msg.MessageID
 		bot.mux.Unlock()

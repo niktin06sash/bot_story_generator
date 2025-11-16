@@ -69,7 +69,8 @@ func main() {
 	defer c.Close()
 	storyCache := repository.NewStoryCache(c)
 	//бизнес-логика(база данных + ии)
-	storyService := service.NewStoryService(cfg, storyDatabase, aiB, storyCache, logger)
+	//небольшая кашка-малашка
+	storyService := service.NewService(cfg, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, aiB, storyCache, storyCache, storyCache, logger)
 
 	// получение переменных настроек из базы и загрузка в кэш
 	ctx, cancel := context.WithCancel(context.Background())
