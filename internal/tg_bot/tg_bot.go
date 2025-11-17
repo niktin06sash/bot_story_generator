@@ -191,7 +191,11 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 			if !ok {
 				return
 			}
-			trace := editMsg.Trace
+			trace, ok := editMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			if !ok {
+				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", editMsg.UserID), zap.Any("trace", trace))
+				continue
+			}
 			var keyboard tgbotapi.InlineKeyboardMarkup
 			if len(editMsg.ButtonArgs) > 0 {
 				var rows [][]tgbotapi.InlineKeyboardButton
@@ -255,7 +259,11 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 			if !ok {
 				return
 			}
-			trace := deleteMsg.Trace
+			trace, ok := deleteMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			if !ok {
+				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", deleteMsg.UserID), zap.Any("trace", trace))
+				continue
+			}
 			del := tgbotapi.NewDeleteMessage(deleteMsg.UserID, deleteMsg.MsgID)
 			_, err := bot.api.Request(del)
 			if err != nil {
@@ -368,8 +376,12 @@ func (bot *Bot) sendInvoiceMessage(ch chan models.InvoiceMessage) {
 				return
 			}
 
-			//bot.sendMessage(msg.Subscription.UserID, text_messages.TextSendInvoiceSubscription, nil)
-			bot.sendSubscriptionInvoice(msg.Subscription, msg.Trace)
+			trace, ok := msg.Ctx.Value(models.TraceKey).(models.Trace)
+			if !ok {
+				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", msg.Subscription.UserID), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
+				continue
+			}
+			bot.sendSubscriptionInvoice(msg.Subscription, trace)
 		}
 	}
 }
@@ -383,7 +395,11 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 			if !ok {
 				return
 			}
-			trace := outMsg.Trace
+			trace, ok := outMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			if !ok {
+				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", outMsg.UserID), zap.Any("trace", trace))
+				continue
+			}
 			var text []string
 			if strings.Contains(outMsg.Text, "---") {
 				parts := strings.Split(outMsg.Text, "---")

@@ -13,8 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64, trace models.Trace) ([]string, error) {
+func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	place := "CreateStory"
+	trace := s.getTrace(ctx)
 	// Проверяем, нет ли активных историй у пользователя в данный момент
 	stories, err := s.storyDatabase.GetActiveStories(ctx, userID)
 	if err != nil {
@@ -105,8 +106,9 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64, trace model
 	s.Logger.ZapLogger.Info("Story created successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return text_messages.NewChouseHero(fantasyCharacters), nil
 }
-func (s *ServiceImpl) StopStory(ctx context.Context, userID int64, trace models.Trace) (string, error) {
+func (s *ServiceImpl) StopStory(ctx context.Context, userID int64) (string, error) {
 	place := "StopStory"
+	trace := s.getTrace(ctx)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	stories, err := s.storyDatabase.GetActiveStories(ctxTimeout, userID)
@@ -127,7 +129,8 @@ func (s *ServiceImpl) StopStory(ctx context.Context, userID int64, trace models.
 	return text_messages.TextStopActiveStory, nil
 }
 
-func (s *ServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string, trace models.Trace) (string, error) {
+func (s *ServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error) {
+	trace := s.getTrace(ctx)
 	if arg == "❌" {
 		return "", nil
 	}
@@ -143,7 +146,8 @@ func (s *ServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg str
 	s.Logger.ZapLogger.Info("Active story stopped successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return text_messages.TextSuccessStopStory, nil
 }
-func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string, trace models.Trace) ([]string, error) {
+func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
+	trace := s.getTrace(ctx)
 	place := "UserChoice"
 	number_choice, err := strconv.Atoi(num)
 	if err != nil || number_choice < 1 {

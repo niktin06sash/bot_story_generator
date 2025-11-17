@@ -44,8 +44,14 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Database-connect")
 	defer pgx.Close()
-	storyDatabase := repository.NewStoryDatabase(pgx)
-
+	txman := repository.NewTxManager(pgx)
+	userdb := repository.NewUserDatabase(pgx)
+	storydb := repository.NewStoryDatabase(pgx)
+	vardb := repository.NewVariantDatabase(pgx)
+	dldb := repository.NewDailyLimitDatabase(pgx)
+	msgdb := repository.NewMessageDatabase(pgx)
+	subdb := repository.NewSubscriptionDatabase(pgx)
+	setdb := repository.NewSettingDatabase(pgx)
 	//ии(подключение + методы ии)
 	aiConn, err := ai.NewAIConnection(cfg, logger, cfg.AI.Model)
 	if err != nil {
@@ -67,15 +73,16 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Cache-connect")
 	defer c.Close()
-	storyCache := repository.NewStoryCache(c)
+	usercache := repository.NewUserCache(c)
+	setcache := repository.NewSettingCache(c)
+	dlcache := repository.NewDailyLimitCache(c)
 	//бизнес-логика(база данных + ии)
-	//небольшая кашка-малашка
-	storyService := service.NewService(cfg, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, storyDatabase, aiB, storyCache, storyCache, storyCache, logger)
+	storyService := service.NewService(cfg, txman, userdb, storydb, vardb, dldb, msgdb, subdb, setdb, aiB, dlcache, setcache, usercache, logger)
 
 	// получение переменных настроек из базы и загрузка в кэш
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	settings, err := storyDatabase.GetAllSettings(ctx)
+	settings, err := setdb.GetAllSettings(ctx)
 	if err != nil {
 		logger.ZapLogger.Debug("Failed to get settings from Database",
 			zap.Error(err),
@@ -83,7 +90,7 @@ func main() {
 		return
 	}
 	logger.ZapLogger.Debug("Successful get settings from Database")
-	err = storyCache.LoadCacheData(ctx, settings)
+	err = setcache.LoadCacheData(ctx, settings)
 	if err != nil {
 		logger.ZapLogger.Debug("Failed to load settings into Cache",
 			zap.Error(err),

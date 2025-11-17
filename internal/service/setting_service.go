@@ -11,7 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64, trace models.Trace) (string, error) {
+func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "SetSetting"
 	if key == "" {
 		s.Logger.ZapLogger.Warn("Empty Key", zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
@@ -82,7 +83,8 @@ func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, 
 	return text_messages.TextSuccessSetSetting, nil
 }
 
-func (s *ServiceImpl) ViewSetting(ctx context.Context, trace models.Trace) (string, error) {
+func (s *ServiceImpl) ViewSetting(ctx context.Context) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "ViewSetting"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -111,7 +113,8 @@ func (s *ServiceImpl) ViewSetting(ctx context.Context, trace models.Trace) (stri
 	return formattedMessage, nil
 }
 
-func (s *ServiceImpl) RebootCacheData(ctx context.Context, trace models.Trace) (string, error) {
+func (s *ServiceImpl) RebootCacheData(ctx context.Context) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "RebootCacheData"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

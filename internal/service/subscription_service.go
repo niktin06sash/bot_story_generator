@@ -14,7 +14,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData, trace models.Trace) error {
+func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
+	trace := s.getTrace(ctx)
 	place := "ValidatePreCheckout"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -85,7 +86,8 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 
 // Обработка команды покупки подписки
 // Проверяем, что нет активной подписки + добавляем в бд pending у подписки
-func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64, trace models.Trace) (*models.Subscription, error) {
+func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+	trace := s.getTrace(ctx)
 	place := "BuySubscription"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -126,7 +128,8 @@ func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64, trace m
 	s.Logger.ZapLogger.Info("Subscription pending successfully", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return sub, nil
 }
-func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData, trace models.Trace) error {
+func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
+	trace := s.getTrace(ctx)
 	place := "CommitSubscription"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -163,7 +166,8 @@ func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.Payment
 	return nil
 }
 
-func (s *ServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64, trace models.Trace) (string, error) {
+func (s *ServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "GetSubscriptionStatus"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

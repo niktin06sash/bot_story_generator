@@ -26,15 +26,14 @@ type IncommingMessage struct {
 	Trace     Trace
 }
 
-func NewOutboundMessage(ctx context.Context, userId int64, text string, trace Trace, buttonArgs ...ButtonArg) OutboundMessage {
-	return OutboundMessage{Ctx: ctx, UserID: userId, Text: text, ButtonArgs: buttonArgs, Trace: trace}
+func NewOutboundMessage(ctx context.Context, userId int64, text string, buttonArgs ...ButtonArg) OutboundMessage {
+	return OutboundMessage{Ctx: ctx, UserID: userId, Text: text, ButtonArgs: buttonArgs}
 }
 
 type OutboundMessage struct {
 	Ctx        context.Context
 	UserID     int64
 	Text       string
-	Trace      Trace
 	ButtonArgs []ButtonArg
 }
 
@@ -47,26 +46,26 @@ func NewButtonArg(btn string, args []string) ButtonArg {
 	return ButtonArg{ButtonName: btn, Args: args}
 }
 
-func NewEditMessage(userID int64, msgID int, text string, trace Trace, buttonArgs ...ButtonArg) EditMessage {
-	return EditMessage{UserID: userID, MsgID: msgID, ButtonArgs: buttonArgs, Text: text, Trace: trace}
+func NewEditMessage(ctx context.Context, userID int64, msgID int, text string, buttonArgs ...ButtonArg) EditMessage {
+	return EditMessage{UserID: userID, MsgID: msgID, ButtonArgs: buttonArgs, Text: text, Ctx: ctx}
 }
 
 type EditMessage struct {
+	Ctx        context.Context
 	UserID     int64
 	MsgID      int
 	Text       string
-	Trace      Trace
 	ButtonArgs []ButtonArg
 }
 
 type DeleteMessage struct {
+	Ctx    context.Context
 	UserID int64
 	MsgID  int
-	Trace  Trace
 }
 
-func NewDeleteMessage(userID int64, msgID int, trace Trace) DeleteMessage {
-	return DeleteMessage{UserID: userID, MsgID: msgID, Trace: trace}
+func NewDeleteMessage(ctx context.Context, userID int64, msgID int) DeleteMessage {
+	return DeleteMessage{UserID: userID, MsgID: msgID, Ctx: ctx}
 }
 
 // GenerateSchema генерирует JSON схему для типа T
@@ -121,15 +120,15 @@ type Extension struct {
 
 // InvoiceMessage
 type InvoiceMessage struct {
+	Ctx          context.Context
 	Subscription *Subscription
-	Trace        Trace
 }
 
 // NewInvoiceMessage создает invoice с указанным chatID
-func NewInvoiceMessage(sub *Subscription, trace Trace) InvoiceMessage {
+func NewInvoiceMessage(ctx context.Context, sub *Subscription) InvoiceMessage {
 	return InvoiceMessage{
 		Subscription: sub,
-		Trace:        trace,
+		Ctx:          ctx,
 	}
 }
 
@@ -157,6 +156,8 @@ func NewPaymentData(queryID string, currency, invoicePayload string, totalAmount
 		Trace:          trace,
 	}
 }
+
+const TraceKey string = "trace"
 
 type Trace struct {
 	ID        string

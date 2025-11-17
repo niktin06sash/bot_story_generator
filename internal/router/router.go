@@ -13,24 +13,24 @@ import (
 )
 
 type StoryService interface {
-	CreateStory(ctx context.Context, userID int64, trace models.Trace) ([]string, error)
-	StopStory(ctx context.Context, userID int64, trace models.Trace) (string, error)
-	StopStoryChoice(ctx context.Context, userID int64, arg string, trace models.Trace) (string, error)
+	CreateStory(ctx context.Context, userID int64) ([]string, error)
+	StopStory(ctx context.Context, userID int64) (string, error)
+	StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error)
 
-	UserChoice(ctx context.Context, userID int64, arg string, trace models.Trace) ([]string, error)
+	UserChoice(ctx context.Context, userID int64, arg string) ([]string, error)
 
-	CreateUser(ctx context.Context, userID int64, trace models.Trace) (string, error)
+	CreateUser(ctx context.Context, userID int64) (string, error)
 
-	ValidatePreCheckout(ctx context.Context, pd *models.PaymentData, trace models.Trace) error
-	BuySubscription(ctx context.Context, userID int64, trace models.Trace) (*models.Subscription, error)
-	CommitSubscription(ctx context.Context, pd *models.PaymentData, trace models.Trace) error
-	GetSubscriptionStatus(ctx context.Context, userID int64, trace models.Trace) (string, error)
+	ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error
+	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
+	CommitSubscription(ctx context.Context, pd *models.PaymentData) error
+	GetSubscriptionStatus(ctx context.Context, userID int64) (string, error)
 
-	SetSetting(ctx context.Context, key string, value string, updatedBy int64, trace models.Trace) (string, error)
-	ViewSetting(ctx context.Context, trace models.Trace) (string, error)
-	RebootCacheData(ctx context.Context, trace models.Trace) (string, error)
+	SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error)
+	ViewSetting(ctx context.Context) (string, error)
+	RebootCacheData(ctx context.Context) (string, error)
 
-	AdminCommands(ctx context.Context, command string, trace models.Trace) (string, error)
+	AdminCommands(ctx context.Context, command string) (string, error)
 }
 
 type StoryRouterImpl struct {
@@ -108,9 +108,11 @@ func (r *StoryRouterImpl) paymentWorker() {
 				}
 				r.userState[data.UserID] = struct{}{}
 				r.mux.Unlock()
+				ctx := context.WithValue(r.ctx, models.TraceKey, data.Trace)
 				if data.ChargeID == "" && data.QueryID != "" {
+					//TODO добавить таймаут на выполнение
 					r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.service.ValidatePreCheckout(r.ctx, data, data.Trace)
+					err := r.service.ValidatePreCheckout(ctx, data)
 					if err != nil {
 						data.Error = err
 						r.createPaymentMessage(data)
@@ -121,8 +123,9 @@ func (r *StoryRouterImpl) paymentWorker() {
 					r.cleanUserState(data.UserID)
 
 				} else if data.ChargeID != "" && data.QueryID == "" {
+					//TODO добавить таймаут на выполнение
 					r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.service.CommitSubscription(r.ctx, data, data.Trace)
+					err := r.service.CommitSubscription(ctx, data)
 					if err != nil {
 						data.Error = err
 						r.createPaymentMessage(data)
@@ -156,74 +159,75 @@ func (r *StoryRouterImpl) routerWorker() {
 			userID := msg.UserID
 			msgID := msg.MsgID
 			trace := msg.Trace
+			ctx := context.WithValue(r.ctx, models.TraceKey, trace)
 			if data == "start" {
 				//2 лог
 				r.logger.ZapLogger.Info("Creating user...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.CreateUser(r.ctx, userID, trace)
+				resp, err := r.service.CreateUser(ctx, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
-					r.createOutboundMessage(r.ctx, userID, resp, trace)
+					r.createOutboundMessage(ctx, userID, resp)
 				}
 				r.cleanUserState(userID)
 
 			} else if data == "newstory" {
 				//2 лог
 				r.logger.ZapLogger.Info("Creating new story...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				localctx, cancel := context.WithCancel(r.ctx)
+				localctx, cancel := context.WithCancel(ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes, trace)
-				resp, err := r.service.CreateStory(r.ctx, userID, trace)
+				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
+				resp, err := r.service.CreateStory(ctx, userID)
 				cancel()
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextStartCreateHero, trace)
+				r.createOutboundMessage(ctx, userID, text_messages.TextStartCreateHero)
 				// Выводим всех персонажей (первые len(resp)-1 элементов)
 				for i := 0; i < len(resp)-1; i++ {
-					r.createOutboundMessage(r.ctx, userID, resp[i], trace)
+					r.createOutboundMessage(ctx, userID, resp[i])
 				}
 				// Последний элемент - текст с кнопками выбора
-				r.createOutboundMessage(r.ctx, userID, resp[len(resp)-1], trace, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				r.createOutboundMessage(ctx, userID, resp[len(resp)-1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
 
 			} else if strings.HasPrefix(data, "userChoice_") {
 				//2 лог
 				r.logger.ZapLogger.Info("User making a choice...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				localctx, cancel := context.WithCancel(r.ctx)
+				localctx, cancel := context.WithCancel(ctx)
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
-				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextNarrative, trace)
+				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
-				resp, err := r.service.UserChoice(r.ctx, userID, arg, trace)
+				resp, err := r.service.UserChoice(ctx, userID, arg)
 				cancel()
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createEditMessage(userID, msgID, "", trace)
-				r.createOutboundMessage(r.ctx, userID, resp[0], trace)
-				r.createOutboundMessage(r.ctx, userID, resp[1], trace, models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
+				r.createEditMessage(ctx, userID, msgID, "")
+				r.createOutboundMessage(ctx, userID, resp[0])
+				r.createOutboundMessage(ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
 
 			} else if data == "help" {
 				//2 лог
 				r.logger.ZapLogger.Info("User getting help...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextHelp(), trace)
+				r.createOutboundMessage(ctx, userID, text_messages.TextHelp())
 				r.cleanUserState(userID)
 
 			} else if data == "stopstory" {
 				//2 лог
 				r.logger.ZapLogger.Info("User stopping story...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.StopStory(r.ctx, userID, trace)
+				resp, err := r.service.StopStory(ctx, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
-					r.createOutboundMessage(r.ctx, userID, resp, trace, models.NewButtonArg("stopStoryChoice_", []string{"✅", "❌"}))
+					r.createOutboundMessage(ctx, userID, resp, models.NewButtonArg("stopStoryChoice_", []string{"✅", "❌"}))
 				}
 				r.cleanUserState(userID)
 
@@ -231,79 +235,79 @@ func (r *StoryRouterImpl) routerWorker() {
 				//2 лог
 				r.logger.ZapLogger.Info("User making a stop story choice...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
 				arg := strings.TrimPrefix(data, "stopStoryChoice_")
-				resp, err := r.service.StopStoryChoice(r.ctx, userID, arg, trace)
-				r.createDeleteMessage(userID, msgID, trace)
+				resp, err := r.service.StopStoryChoice(ctx, userID, arg)
+				r.createDeleteMessage(ctx, userID, msgID)
 				if resp == "" && err == nil {
 					r.cleanUserState(userID)
 					continue
 				}
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, resp, trace)
+				r.createOutboundMessage(ctx, userID, resp)
 				r.cleanUserState(userID)
 
 			} else if data == "buySubscription" {
 				//2 лог
 				r.logger.ZapLogger.Info("Processing buying subscription...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				sub, err := r.service.BuySubscription(r.ctx, userID, trace)
+				sub, err := r.service.BuySubscription(ctx, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createInvoiceMessage(sub, trace)
+				r.createInvoiceMessage(ctx, sub)
 				r.cleanUserState(userID)
 
 			} else if data == "subscription" {
 				//2 лог
 				r.logger.ZapLogger.Info("Checking subscription status...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.GetSubscriptionStatus(r.ctx, userID, trace)
+				resp, err := r.service.GetSubscriptionStatus(ctx, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, resp, trace)
+				r.createOutboundMessage(ctx, userID, resp)
 				r.cleanUserState(userID)
 
 			} else if data == "terms" {
 				// Обработка запроса на просмотр пользовательского соглашения (terms)
 				r.logger.ZapLogger.Info("User requesting terms of service...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextTermsOfService, trace)
+				r.createOutboundMessage(ctx, userID, text_messages.TextTermsOfService)
 				r.cleanUserState(userID)
 
 			} else if data == "support" {
 				// Обработка запроса на поддержку
 				r.logger.ZapLogger.Info("User requesting support...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextSupportInfo, trace)
+				r.createOutboundMessage(ctx, userID, text_messages.TextSupportInfo)
 				r.cleanUserState(userID)
 
 			} else if data == "changeSetting" {
 				// Обработка изменения настроек администратором
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting change attempt", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+					r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 
 				if len(msg.Arguments) == 0 {
 					r.logger.ZapLogger.Error("Missing setting arguments", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, "Не указаны параметры настройки", trace)
+					r.createOutboundMessage(ctx, userID, "Не указаны параметры настройки")
 					r.cleanUserState(userID)
 					continue
 				}
 				//в логах лучше не хранить конкретные данные настройки. только если имя настройки
 				r.logger.ZapLogger.Info("Admin changing settings...", zap.Any("userID", userID), zap.Any("setting", msg.Arguments[0].NameSetting), zap.Any("traceID", trace.ID))
 
-				resp, err := r.service.SetSetting(r.ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID, trace)
+				resp, err := r.service.SetSetting(ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
-					r.createOutboundMessage(r.ctx, userID, resp, trace)
+					r.createOutboundMessage(ctx, userID, resp)
 				}
 				r.cleanUserState(userID)
 
@@ -311,19 +315,19 @@ func (r *StoryRouterImpl) routerWorker() {
 				// Обработка просмотра настроек администратором
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+					r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 
 				r.logger.ZapLogger.Info("Admin viewing settings...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				formattedMessage, err := r.service.ViewSetting(r.ctx, trace)
+				formattedMessage, err := r.service.ViewSetting(ctx)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, formattedMessage, trace)
+				r.createOutboundMessage(ctx, userID, formattedMessage)
 
 				r.logger.ZapLogger.Info("Admin viewed settings", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
 				r.cleanUserState(userID)
@@ -332,45 +336,45 @@ func (r *StoryRouterImpl) routerWorker() {
 				// Обработка просмотра настроек администратором
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+					r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 				r.logger.ZapLogger.Info("Admin rebooting cache...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.RebootCacheData(r.ctx, trace)
+				resp, err := r.service.RebootCacheData(ctx)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, resp, trace)
+				r.createOutboundMessage(ctx, userID, resp)
 				r.cleanUserState(userID)
 
 			} else if data == "admin" {
 				// Выводим админские команды
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized setting view attempt", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+					r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 
 				resp := text_messages.TextAdmin()
-				r.createOutboundMessage(r.ctx, userID, resp, trace)
+				r.createOutboundMessage(ctx, userID, resp)
 				r.cleanUserState(userID)
 
 				// Admin command handler for "addsub", "getsub", "updatesub"
 			} else if data == "addsub" || data == "getsub" || data == "updatesub" {
 				if !r.checkAdmin(userID) {
 					r.logger.ZapLogger.Warn("Unauthorized admin command attempt", zap.String("command", data), zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+					r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 					r.cleanUserState(userID)
 					continue
 				}
 				// Обработка аргументов (пример аналогичный просмотру/изменению настроек)
 				if len(msg.Arguments) == 0 {
 					r.logger.ZapLogger.Error("Missing admin command arguments", zap.String("command", data), zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-					r.createOutboundMessage(r.ctx, userID, "Не указаны параметры для команды", trace)
+					r.createOutboundMessage(ctx, userID, "Не указаны параметры для команды")
 					r.cleanUserState(userID)
 					continue
 				}
@@ -379,19 +383,19 @@ func (r *StoryRouterImpl) routerWorker() {
 				//* будем примать по примеру /command _ (nameSetting) 111111 XTR 11 (Value setting)
 				//* потому что принимает от бота только один аргумент
 				fullCmd := data + " " + msg.Arguments[0].ValueSetting
-				resp, err := r.service.AdminCommands(r.ctx, fullCmd, trace)
+				resp, err := r.service.AdminCommands(ctx, fullCmd)
 				if err != nil {
-					r.createOutboundMessage(r.ctx, userID, err.Error(), trace)
+					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
 					continue
 				}
-				r.createOutboundMessage(r.ctx, userID, resp, trace)
+				r.createOutboundMessage(ctx, userID, resp)
 				r.cleanUserState(userID)
 
 			} else {
 				//2 лог
 				r.logger.ZapLogger.Info("User entered an unknown command...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				r.createOutboundMessage(r.ctx, userID, text_messages.TextUnknownCommand, trace)
+				r.createOutboundMessage(ctx, userID, text_messages.TextUnknownCommand)
 				r.cleanUserState(userID)
 			}
 

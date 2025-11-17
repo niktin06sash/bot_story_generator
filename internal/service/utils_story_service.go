@@ -137,3 +137,11 @@ func (s *ServiceImpl) getSubPrice(ctx context.Context, userID int64, trace model
 	}
 	return priceInt, nil
 }
+func (s *ServiceImpl) getTrace(ctx context.Context) models.Trace {
+	trace, ok := ctx.Value(models.TraceKey).(models.Trace)
+	if !ok {
+		s.Logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("trace", trace))
+		return models.Trace{}
+	}
+	return trace
+}

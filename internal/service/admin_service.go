@@ -13,7 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, subType, currency string, price int, durationDays int, trace models.Trace) (string, error) {
+func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, subType, currency string, price int, durationDays int) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "AddSubscriptionByAdmin"
 	now := time.Now()
 	end := now.Add(time.Duration(durationDays) * 24 * time.Hour)
@@ -39,7 +40,8 @@ func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, 
 	return fmt.Sprintf(text_messages.SuccessActivateSub, userID), nil
 }
 
-func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int64, durationDays int, trace models.Trace) (string, error) {
+func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int64, durationDays int) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "UpdateSubscriptionByAdmin"
 	activeSubs, err := s.subDatabase.GetActiveSubscriptions(ctx, userID)
 	if err != nil {
@@ -79,7 +81,7 @@ func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int6
 	return fmt.Sprintf(text_messages.SuccessUpdateSub, userID), nil
 }
 
-func (s *ServiceImpl) AdminCommands(ctx context.Context, command string, trace models.Trace) (string, error) {
+func (s *ServiceImpl) AdminCommands(ctx context.Context, command string) (string, error) {
 	fields := strings.Fields(command)
 	if len(fields) < 1 {
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -97,7 +99,7 @@ func (s *ServiceImpl) AdminCommands(ctx context.Context, command string, trace m
 		if err1 != nil || err2 != nil || err3 != nil {
 			return "", errors.New(text_messages.TextErrorSettings)
 		}
-		return s.AddSubscriptionByAdmin(ctx, userID, subType, currency, price, durationDays, trace)
+		return s.AddSubscriptionByAdmin(ctx, userID, subType, currency, price, durationDays)
 	case "updatesub":
 		if len(fields) != 3 {
 			return "", errors.New(text_messages.TextErrorSettings)
@@ -107,7 +109,7 @@ func (s *ServiceImpl) AdminCommands(ctx context.Context, command string, trace m
 		if err1 != nil || err2 != nil {
 			return "", errors.New(text_messages.TextErrorSettings)
 		}
-		return s.UpdateSubscriptionByAdmin(ctx, userID, durationDays, trace)
+		return s.UpdateSubscriptionByAdmin(ctx, userID, durationDays)
 	case "getsub":
 		if len(fields) != 2 {
 			return "", errors.New(text_messages.TextErrorSettings)

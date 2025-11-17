@@ -11,7 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) CreateUser(ctx context.Context, userID int64, trace models.Trace) (string, error) {
+func (s *ServiceImpl) CreateUser(ctx context.Context, userID int64) (string, error) {
+	trace := s.getTrace(ctx)
 	place := "CreateUser"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
