@@ -56,7 +56,7 @@ func (s *VariantDatabaseImpl) GetActiveVariants(ctx context.Context, userID int6
 	}
 	defer rows.Close()
 
-	var variants []*models.StoryVariant
+	variants := make([]*models.StoryVariant, 0)
 	for rows.Next() {
 		variant := &models.StoryVariant{}
 		err := rows.Scan(&variant.StoryID, &variant.Data, &variant.Type)

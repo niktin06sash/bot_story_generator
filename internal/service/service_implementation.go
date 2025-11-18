@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-//go:generate mockgen -source=story_service.go -destination=mocks/mock.go
 type TxManager interface {
 	BeginTx(ctx context.Context) (pgx.Tx, error)
 	RollbackTx(ctx context.Context, tx pgx.Tx) error
@@ -72,37 +71,23 @@ type UserCache interface {
 	AddCreatedUser(ctx context.Context, userID int64) error
 	CheckCreatedUser(ctx context.Context, userID int64) (bool, error)
 }
-type ServiceImpl struct {
-	txManager        TxManager
-	userDatabase     UserDatabase
-	storyDatabase    StoryDatabase
-	variantDatabase  VariantDatabase
-	daylimitDatabase DailyLimitDatabase
-	msgDatabase      MessageDatabase
-	subDatabase      SubscriptionDatabase
-	settingDatabase  SettingDatabase
-	storyAI          StoryAI
-	daylimitCache    DailyLimitCache
-	settingCache     SettingCache
-	userCache        UserCache
-	Logger           *logger.Logger
+
+//go:generate mockgen -source=service_implementation.go -destination=mocks/mock.go
+type Service struct {
+	AdminService   *AdminServiceImpl
+	SettingService *SettingServiceImpl
+	UserService    *UserServiceImpl
+	StoryService   *StoryServiceImpl
+	SubService     *SubscriptionServiceImpl
 }
 
 func NewService(cfg *config.Config, txMan TxManager, userDB UserDatabase, storyDB StoryDatabase, varDB VariantDatabase, daylimitDB DailyLimitDatabase, msgDB MessageDatabase, subDB SubscriptionDatabase,
-	settingDB SettingDatabase, storyAI StoryAI, limitCache DailyLimitCache, settingCache SettingCache, userCache UserCache, logger *logger.Logger) *ServiceImpl {
-	return &ServiceImpl{
-		txManager:        txMan,
-		userDatabase:     userDB,
-		storyDatabase:    storyDB,
-		variantDatabase:  varDB,
-		daylimitDatabase: daylimitDB,
-		msgDatabase:      msgDB,
-		subDatabase:      subDB,
-		settingDatabase:  settingDB,
-		storyAI:          storyAI,
-		daylimitCache:    limitCache,
-		settingCache:     settingCache,
-		userCache:        userCache,
-		Logger:           logger,
+	settingDB SettingDatabase, storyAI StoryAI, limitCache DailyLimitCache, settingCache SettingCache, userCache UserCache, logger *logger.Logger) *Service {
+	return &Service{
+		AdminService:   NewAdminService(subDB, logger),
+		SettingService: NewSettingService(settingCache, settingDB, txMan, logger),
+		UserService:    NewUserService(userDB, userCache, logger),
+		StoryService:   NewStoryService(settingCache, subDB, limitCache, daylimitDB, storyDB, storyAI, txMan, varDB, msgDB, logger),
+		SubService:     NewSubscriptionService(settingCache, subDB, limitCache, daylimitDB, logger),
 	}
 }

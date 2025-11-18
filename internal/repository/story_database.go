@@ -31,7 +31,7 @@ func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) 
 		return nil, fmt.Errorf("server: database error: %w", err)
 	}
 	defer rows.Close()
-	var stories []*models.Story
+	stories := make([]*models.Story, 0)
 	for rows.Next() {
 		story := &models.Story{}
 		err := rows.Scan(&story.ID, &story.UserID, &story.Data, &story.CreatedAt)

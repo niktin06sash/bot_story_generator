@@ -12,31 +12,38 @@ import (
 	"go.uber.org/zap"
 )
 
-type StoryService interface {
-	CreateStory(ctx context.Context, userID int64) ([]string, error)
-	StopStory(ctx context.Context, userID int64) (string, error)
-	StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error)
-
-	UserChoice(ctx context.Context, userID int64, arg string) ([]string, error)
-
+type UserService interface {
 	CreateUser(ctx context.Context, userID int64) (string, error)
-
+}
+type SubscriptionService interface {
 	ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error
 	BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error)
 	CommitSubscription(ctx context.Context, pd *models.PaymentData) error
 	GetSubscriptionStatus(ctx context.Context, userID int64) (string, error)
-
+}
+type SettingService interface {
 	SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error)
 	ViewSetting(ctx context.Context) (string, error)
 	RebootCacheData(ctx context.Context) (string, error)
-
+}
+type AdminService interface {
 	AdminCommands(ctx context.Context, command string) (string, error)
+}
+type StoryService interface {
+	CreateStory(ctx context.Context, userID int64) ([]string, error)
+	StopStory(ctx context.Context, userID int64) (string, error)
+	StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error)
+	UserChoice(ctx context.Context, userID int64, arg string) ([]string, error)
 }
 
 type StoryRouterImpl struct {
 	ctx                    context.Context
 	cancel                 context.CancelFunc
-	service                StoryService
+	story_service          StoryService
+	setting_service        SettingService
+	admin_service          AdminService
+	sub_service            SubscriptionService
+	user_service           UserService
 	chan_command           chan models.IncommingMessage
 	chan_outbound_payments chan *models.PaymentData
 	chan_outbound          chan models.OutboundMessage
@@ -52,12 +59,16 @@ type StoryRouterImpl struct {
 	numworkers             int
 }
 
-func NewRouter(cfg *config.Config, service StoryService, logger *logger.Logger) *StoryRouterImpl {
+func NewRouter(cfg *config.Config, story StoryService, setting SettingService, admin AdminService, sub SubscriptionService, user UserService, logger *logger.Logger) *StoryRouterImpl {
 	context, cancel := context.WithCancel(context.Background())
 	routerImpl := &StoryRouterImpl{
 		ctx:                    context,
 		cancel:                 cancel,
-		service:                service,
+		story_service:          story,
+		setting_service:        setting,
+		admin_service:          admin,
+		sub_service:            sub,
+		user_service:           user,
 		chan_command:           make(chan models.IncommingMessage, 1000),
 		chan_outbound_payments: make(chan *models.PaymentData, 1000),
 		chan_payments:          make(chan *models.PaymentData, 1000),
@@ -112,7 +123,7 @@ func (r *StoryRouterImpl) paymentWorker() {
 				if data.ChargeID == "" && data.QueryID != "" {
 					//TODO добавить таймаут на выполнение
 					r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.service.ValidatePreCheckout(ctx, data)
+					err := r.sub_service.ValidatePreCheckout(ctx, data)
 					if err != nil {
 						data.Error = err
 						r.createPaymentMessage(data)
@@ -125,7 +136,7 @@ func (r *StoryRouterImpl) paymentWorker() {
 				} else if data.ChargeID != "" && data.QueryID == "" {
 					//TODO добавить таймаут на выполнение
 					r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.service.CommitSubscription(ctx, data)
+					err := r.sub_service.CommitSubscription(ctx, data)
 					if err != nil {
 						data.Error = err
 						r.createPaymentMessage(data)
@@ -163,7 +174,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			if data == "start" {
 				//2 лог
 				r.logger.ZapLogger.Info("Creating user...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.CreateUser(ctx, userID)
+				resp, err := r.user_service.CreateUser(ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
@@ -178,7 +189,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				//*можно будет потом добавить еще типы сообщений для обработки
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextHeroes)
-				resp, err := r.service.CreateStory(ctx, userID)
+				resp, err := r.story_service.CreateStory(ctx, userID)
 				cancel()
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
@@ -202,7 +213,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				ctxWithValue := context.WithValue(localctx, "delete", "1")
 				r.createOutboundMessage(ctxWithValue, userID, text_messages.WaitingTextNarrative)
 				arg := strings.TrimPrefix(data, "userChoice_")
-				resp, err := r.service.UserChoice(ctx, userID, arg)
+				resp, err := r.story_service.UserChoice(ctx, userID, arg)
 				cancel()
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
@@ -223,7 +234,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			} else if data == "stopstory" {
 				//2 лог
 				r.logger.ZapLogger.Info("User stopping story...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.StopStory(ctx, userID)
+				resp, err := r.story_service.StopStory(ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
@@ -235,7 +246,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				//2 лог
 				r.logger.ZapLogger.Info("User making a stop story choice...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
 				arg := strings.TrimPrefix(data, "stopStoryChoice_")
-				resp, err := r.service.StopStoryChoice(ctx, userID, arg)
+				resp, err := r.story_service.StopStoryChoice(ctx, userID, arg)
 				r.createDeleteMessage(ctx, userID, msgID)
 				if resp == "" && err == nil {
 					r.cleanUserState(userID)
@@ -252,7 +263,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			} else if data == "buySubscription" {
 				//2 лог
 				r.logger.ZapLogger.Info("Processing buying subscription...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				sub, err := r.service.BuySubscription(ctx, userID)
+				sub, err := r.sub_service.BuySubscription(ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
@@ -264,7 +275,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			} else if data == "subscription" {
 				//2 лог
 				r.logger.ZapLogger.Info("Checking subscription status...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.GetSubscriptionStatus(ctx, userID)
+				resp, err := r.sub_service.GetSubscriptionStatus(ctx, userID)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
@@ -303,7 +314,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				//в логах лучше не хранить конкретные данные настройки. только если имя настройки
 				r.logger.ZapLogger.Info("Admin changing settings...", zap.Any("userID", userID), zap.Any("setting", msg.Arguments[0].NameSetting), zap.Any("traceID", trace.ID))
 
-				resp, err := r.service.SetSetting(ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID)
+				resp, err := r.setting_service.SetSetting(ctx, msg.Arguments[0].NameSetting, msg.Arguments[0].ValueSetting, userID)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 				} else {
@@ -321,7 +332,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 
 				r.logger.ZapLogger.Info("Admin viewing settings...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				formattedMessage, err := r.service.ViewSetting(ctx)
+				formattedMessage, err := r.setting_service.ViewSetting(ctx)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
@@ -341,7 +352,7 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.logger.ZapLogger.Info("Admin rebooting cache...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
-				resp, err := r.service.RebootCacheData(ctx)
+				resp, err := r.setting_service.RebootCacheData(ctx)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)
@@ -383,7 +394,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				//* будем примать по примеру /command _ (nameSetting) 111111 XTR 11 (Value setting)
 				//* потому что принимает от бота только один аргумент
 				fullCmd := data + " " + msg.Arguments[0].ValueSetting
-				resp, err := r.service.AdminCommands(ctx, fullCmd)
+				resp, err := r.admin_service.AdminCommands(ctx, fullCmd)
 				if err != nil {
 					r.createOutboundMessage(ctx, userID, err.Error())
 					r.cleanUserState(userID)

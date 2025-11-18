@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"context"
@@ -11,8 +12,23 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error) {
-	trace := s.getTrace(ctx)
+type SettingServiceImpl struct {
+	SettingCache    SettingCache
+	SettingDatabase SettingDatabase
+	TxManager       TxManager
+	Logger          *logger.Logger
+}
+
+func NewSettingService(settCache SettingCache, setdb SettingDatabase, txman TxManager, logger *logger.Logger) *SettingServiceImpl {
+	return &SettingServiceImpl{
+		SettingCache:    settCache,
+		SettingDatabase: setdb,
+		TxManager:       txman,
+		Logger:          logger,
+	}
+}
+func (s *SettingServiceImpl) SetSetting(ctx context.Context, key string, value string, updatedBy int64) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "SetSetting"
 	if key == "" {
 		s.Logger.ZapLogger.Warn("Empty Key", zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
@@ -44,34 +60,34 @@ func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, 
 	}
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	tx, err := s.txManager.BeginTx(ctxTimeout)
+	tx, err := s.TxManager.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 	setting := models.NewSetting(key, value, updatedBy)
-	err = s.settingDatabase.SetSetting(ctxTimeout, tx, setting)
+	err = s.SettingDatabase.SetSetting(ctxTimeout, tx, setting)
 	if err != nil {
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	err = s.settingCache.SetSetting(ctxTimeout, key, value)
+	err = s.SettingCache.SetSetting(ctxTimeout, key, value)
 	if err != nil {
 		s.Logger.ZapLogger.Error("SetSetting", zap.Error(err), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	if err := s.txManager.CommitTx(ctxTimeout, tx); err != nil {
+	if err := s.TxManager.CommitTx(ctxTimeout, tx); err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -83,18 +99,18 @@ func (s *ServiceImpl) SetSetting(ctx context.Context, key string, value string, 
 	return text_messages.TextSuccessSetSetting, nil
 }
 
-func (s *ServiceImpl) ViewSetting(ctx context.Context) (string, error) {
-	trace := s.getTrace(ctx)
+func (s *SettingServiceImpl) ViewSetting(ctx context.Context) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "ViewSetting"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cacheSettings, err := s.settingCache.GetAllSettings(ctxTimeout)
+	cacheSettings, err := s.SettingCache.GetAllSettings(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get settings from cache", zap.Error(err), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
 
-	dbSettings, err := s.settingDatabase.GetAllSettings(ctxTimeout)
+	dbSettings, err := s.SettingDatabase.GetAllSettings(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Failed to get settings from database", zap.Error(err), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -113,17 +129,17 @@ func (s *ServiceImpl) ViewSetting(ctx context.Context) (string, error) {
 	return formattedMessage, nil
 }
 
-func (s *ServiceImpl) RebootCacheData(ctx context.Context) (string, error) {
-	trace := s.getTrace(ctx)
+func (s *SettingServiceImpl) RebootCacheData(ctx context.Context) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "RebootCacheData"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	settings, err := s.settingDatabase.GetAllSettings(ctxTimeout)
+	settings, err := s.SettingDatabase.GetAllSettings(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetAllSettings", zap.Error(err), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
-	err = s.settingCache.LoadCacheData(ctxTimeout, settings)
+	err = s.SettingCache.LoadCacheData(ctxTimeout, settings)
 	if err != nil {
 		s.Logger.ZapLogger.Error("LoadCacheData", zap.Error(err), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)

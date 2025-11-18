@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"context"
@@ -13,11 +14,38 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
+type StoryServiceImpl struct {
+	SettingCache       SettingCache
+	SubDatabase        SubscriptionDatabase
+	DailyLimitCache    DailyLimitCache
+	DailyLimitDatabase DailyLimitDatabase
+	StoryDatabase      StoryDatabase
+	StoryAI            StoryAI
+	TxManager          TxManager
+	VariantDatabase    VariantDatabase
+	MsgDatabase        MessageDatabase
+	Logger             *logger.Logger
+}
+
+func NewStoryService(settCache SettingCache, subdb SubscriptionDatabase, dcache DailyLimitCache, ddb DailyLimitDatabase, stdb StoryDatabase, stAi StoryAI, txman TxManager, vardb VariantDatabase, msgdb MessageDatabase, logger *logger.Logger) *StoryServiceImpl {
+	return &StoryServiceImpl{
+		SubDatabase:        subdb,
+		SettingCache:       settCache,
+		MsgDatabase:        msgdb,
+		DailyLimitCache:    dcache,
+		DailyLimitDatabase: ddb,
+		StoryDatabase:      stdb,
+		StoryAI:            stAi,
+		VariantDatabase:    vardb,
+		TxManager:          txman,
+		Logger:             logger,
+	}
+}
+func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, error) {
 	place := "CreateStory"
-	trace := s.getTrace(ctx)
+	trace := getTrace(ctx, s.Logger)
 	// Проверяем, нет ли активных историй у пользователя в данный момент
-	stories, err := s.storyDatabase.GetActiveStories(ctx, userID)
+	stories, err := s.StoryDatabase.GetActiveStories(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -31,12 +59,12 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 		return nil, errors.New(text_messages.TextErrorUserActiveStory)
 	}
 	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории + подписка
-	limit, err := s.checkDailyLimits(ctx, userID, trace, place)
+	limit, err := checkDailyLimits(ctx, userID, trace, place, s.DailyLimitCache, s.DailyLimitDatabase, s.SubDatabase, s.SettingCache, s.Logger)
 	if err != nil {
 		return nil, err
 	}
 	// Запрос в ИИ
-	fantasyCharacters, err := s.storyAI.GetStructuredHeroes(ctx)
+	fantasyCharacters, err := s.StoryAI.GetStructuredHeroes(ctx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetStructuredHeroes", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -55,7 +83,7 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	tx, err := s.txManager.BeginTx(ctxTimeout)
+	tx, err := s.TxManager.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -63,11 +91,11 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 
 	// Создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
 	story := models.NewStory(userID, nil)
-	storyId, err := s.storyDatabase.AddStory(ctxTimeout, tx, story)
+	storyId, err := s.StoryDatabase.AddStory(ctxTimeout, tx, story)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		//в случае отмены контекста(при завершении исполнения у нас может не сделаться rollback или commit транзакции - возможное решение использовать отдельный контекст для данных операций)
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -76,10 +104,10 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 
 	// Создаем начальный вариант с данными из ИИ
 	variant := models.NewStoryVariant(storyId, "characters", data)
-	err = s.variantDatabase.AddVariant(ctxTimeout, tx, variant)
+	err = s.VariantDatabase.AddVariant(ctxTimeout, tx, variant)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -87,16 +115,16 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 	}
 
 	// Создаем начальный дневной лимит или обновляем(он будет включать в себя как действия с созданием новых историй, так и последующий выбор действий)
-	err = s.updateOrAddDailyLimit(ctxTimeout, tx, limit, 2, trace, place)
+	err = updateOrAddDailyLimit(ctxTimeout, tx, limit, 2, trace, place, s.DailyLimitDatabase, s.TxManager, s.Logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// Делаем подтверждение транзакции после изменения таблиц(+запись в истории, варианты, лимиты)
-	err = s.txManager.CommitTx(ctxTimeout, tx)
+	err = s.TxManager.CommitTx(ctxTimeout, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -106,12 +134,12 @@ func (s *ServiceImpl) CreateStory(ctx context.Context, userID int64) ([]string, 
 	s.Logger.ZapLogger.Info("Story created successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return text_messages.NewChouseHero(fantasyCharacters), nil
 }
-func (s *ServiceImpl) StopStory(ctx context.Context, userID int64) (string, error) {
+func (s *StoryServiceImpl) StopStory(ctx context.Context, userID int64) (string, error) {
 	place := "StopStory"
-	trace := s.getTrace(ctx)
+	trace := getTrace(ctx, s.Logger)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	stories, err := s.storyDatabase.GetActiveStories(ctxTimeout, userID)
+	stories, err := s.StoryDatabase.GetActiveStories(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveStories", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorCreateTask)
@@ -129,15 +157,15 @@ func (s *ServiceImpl) StopStory(ctx context.Context, userID int64) (string, erro
 	return text_messages.TextStopActiveStory, nil
 }
 
-func (s *ServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error) {
-	trace := s.getTrace(ctx)
+func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg string) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	if arg == "❌" {
 		return "", nil
 	}
 	place := "StopStoryChoice"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	err := s.storyDatabase.StopStory(ctxTimeout, userID)
+	err := s.StoryDatabase.StopStory(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorCreateTask)
@@ -146,8 +174,8 @@ func (s *ServiceImpl) StopStoryChoice(ctx context.Context, userID int64, arg str
 	s.Logger.ZapLogger.Info("Active story stopped successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return text_messages.TextSuccessStopStory, nil
 }
-func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
-	trace := s.getTrace(ctx)
+func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num string) ([]string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "UserChoice"
 	number_choice, err := strconv.Atoi(num)
 	if err != nil || number_choice < 1 {
@@ -155,7 +183,7 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	// Получаем варианты (последний активный storyVariant для пользователя)
-	variants, err := s.variantDatabase.GetActiveVariants(ctx, userID)
+	variants, err := s.VariantDatabase.GetActiveVariants(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -165,11 +193,11 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	if len(variants) == 0 {
-		s.Logger.ZapLogger.Error("GetActiveVariants", zap.Error(fmt.Errorf("server: no active story found")), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
+		s.Logger.ZapLogger.Warn("GetActiveVariants", zap.Error(fmt.Errorf("client: user already has not an active history")), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextNoActiveStory)
 	}
 	// Проверяем, есть ли дневные ходы у пользователя для создания новой истории + подписка
-	limit, err := s.checkDailyLimits(ctx, userID, trace, place)
+	limit, err := checkDailyLimits(ctx, userID, trace, place, s.DailyLimitCache, s.DailyLimitDatabase, s.SubDatabase, s.SettingCache, s.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +231,7 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	// Получаем все сегменты истории
-	allStory, err := s.msgDatabase.GetAllStorySegments(ctx, storyID)
+	allStory, err := s.MsgDatabase.GetAllStorySegments(ctx, storyID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -214,7 +242,7 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	allStory = append(allStory, storySegment)
 
 	// Генериуем ответ ии
-	segment, err := s.storyAI.GenerateNextStorySegment(ctx, allStory)
+	segment, err := s.StoryAI.GenerateNextStorySegment(ctx, allStory)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -226,7 +254,7 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	// Создание транзакции для консистентности данных
-	tx, err := s.txManager.BeginTx(ctxTimeout)
+	tx, err := s.TxManager.BeginTx(ctxTimeout)
 	if err != nil {
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
@@ -235,10 +263,10 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	newAssistantMsg := models.NewStoryMessage(storyID, narrative, "assistant")
 
 	// Сохраняем сообщения
-	err = s.msgDatabase.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
+	err = s.MsgDatabase.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddStoryMessages", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -249,7 +277,7 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	choicesData, err := json.Marshal(choice)
 	if err != nil {
 		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -257,9 +285,9 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	}
 
 	addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
-	if err = s.variantDatabase.UpdateVariant(ctxTimeout, tx, addingVariant); err != nil {
+	if err = s.VariantDatabase.UpdateVariant(ctxTimeout, tx, addingVariant); err != nil {
 		s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}
@@ -267,16 +295,16 @@ func (s *ServiceImpl) UserChoice(ctx context.Context, userID int64, num string) 
 	}
 
 	// Обновляем дневной лимит
-	err = s.updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, trace, place)
+	err = updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, trace, place, s.DailyLimitDatabase, s.TxManager, s.Logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// Делаем подтверждение транзакции после изменения таблиц
-	err = s.txManager.CommitTx(ctxTimeout, tx)
+	err = s.TxManager.CommitTx(ctxTimeout, tx)
 	if err != nil {
 		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.txManager.RollbackTx(context.Background(), tx)
+		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
 			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		}

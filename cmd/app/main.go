@@ -44,14 +44,6 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Database-connect")
 	defer pgx.Close()
-	txman := repository.NewTxManager(pgx)
-	userdb := repository.NewUserDatabase(pgx)
-	storydb := repository.NewStoryDatabase(pgx)
-	vardb := repository.NewVariantDatabase(pgx)
-	dldb := repository.NewDailyLimitDatabase(pgx)
-	msgdb := repository.NewMessageDatabase(pgx)
-	subdb := repository.NewSubscriptionDatabase(pgx)
-	setdb := repository.NewSettingDatabase(pgx)
 	//ии(подключение + методы ии)
 	aiConn, err := ai.NewAIConnection(cfg, logger, cfg.AI.Model)
 	if err != nil {
@@ -73,16 +65,15 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful Cache-connect")
 	defer c.Close()
-	usercache := repository.NewUserCache(c)
-	setcache := repository.NewSettingCache(c)
-	dlcache := repository.NewDailyLimitCache(c)
+	repo := repository.NewRepository(pgx, c)
 	//бизнес-логика(база данных + ии)
-	storyService := service.NewService(cfg, txman, userdb, storydb, vardb, dldb, msgdb, subdb, setdb, aiB, dlcache, setcache, usercache, logger)
+	service := service.NewService(cfg, repo.TxManager, repo.UserDatabase, repo.StoryDatabase, repo.VariantDatabase, repo.DailyLimitDatabase,
+		repo.MessageDatabase, repo.SubscriptionDatabase, repo.SettingDatabase, aiB, repo.DailyLimitCache, repo.SettingCache, repo.UserCache, logger)
 
 	// получение переменных настроек из базы и загрузка в кэш
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	settings, err := setdb.GetAllSettings(ctx)
+	settings, err := repo.SettingDatabase.GetAllSettings(ctx)
 	if err != nil {
 		logger.ZapLogger.Debug("Failed to get settings from Database",
 			zap.Error(err),
@@ -90,7 +81,7 @@ func main() {
 		return
 	}
 	logger.ZapLogger.Debug("Successful get settings from Database")
-	err = setcache.LoadCacheData(ctx, settings)
+	err = repo.SettingCache.LoadCacheData(ctx, settings)
 	if err != nil {
 		logger.ZapLogger.Debug("Failed to load settings into Cache",
 			zap.Error(err),
@@ -99,7 +90,7 @@ func main() {
 	}
 	logger.ZapLogger.Debug("Successful load settings into Cache")
 	//роутер
-	router := router.NewRouter(cfg, storyService, logger)
+	router := router.NewRouter(cfg, service.StoryService, service.SettingService, service.AdminService, service.SubService, service.UserService, logger)
 	defer router.Stop()
 	router.StartRouter()
 	logger.ZapLogger.Debug("Successful start Router-Workers")

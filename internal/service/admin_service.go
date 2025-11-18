@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"context"
@@ -13,8 +14,19 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, subType, currency string, price int, durationDays int) (string, error) {
-	trace := s.getTrace(ctx)
+type AdminServiceImpl struct {
+	SubDatabase SubscriptionDatabase
+	Logger      *logger.Logger
+}
+
+func NewAdminService(subdb SubscriptionDatabase, logger *logger.Logger) *AdminServiceImpl {
+	return &AdminServiceImpl{
+		SubDatabase: subdb,
+		Logger:      logger,
+	}
+}
+func (s *AdminServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, subType, currency string, price int, durationDays int) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "AddSubscriptionByAdmin"
 	now := time.Now()
 	end := now.Add(time.Duration(durationDays) * 24 * time.Hour)
@@ -31,7 +43,7 @@ func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, 
 		Currency:      currency,
 		Price:         price,
 	}
-	err := s.subDatabase.AddSubscription(ctx, sub)
+	err := s.SubDatabase.AddSubscription(ctx, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -40,10 +52,10 @@ func (s *ServiceImpl) AddSubscriptionByAdmin(ctx context.Context, userID int64, 
 	return fmt.Sprintf(text_messages.SuccessActivateSub, userID), nil
 }
 
-func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int64, durationDays int) (string, error) {
-	trace := s.getTrace(ctx)
+func (s *AdminServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int64, durationDays int) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "UpdateSubscriptionByAdmin"
-	activeSubs, err := s.subDatabase.GetActiveSubscriptions(ctx, userID)
+	activeSubs, err := s.SubDatabase.GetActiveSubscriptions(ctx, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -71,7 +83,7 @@ func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int6
 		Price:         curSub.Price,
 		ChargeId:      "adminmanual",
 	}
-	err = s.subDatabase.UpdateSubscription(ctx, updatedSub)
+	err = s.SubDatabase.UpdateSubscription(ctx, updatedSub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdateSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("payload", curSub.Payload), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -81,7 +93,7 @@ func (s *ServiceImpl) UpdateSubscriptionByAdmin(ctx context.Context, userID int6
 	return fmt.Sprintf(text_messages.SuccessUpdateSub, userID), nil
 }
 
-func (s *ServiceImpl) AdminCommands(ctx context.Context, command string) (string, error) {
+func (s *AdminServiceImpl) AdminCommands(ctx context.Context, command string) (string, error) {
 	fields := strings.Fields(command)
 	if len(fields) < 1 {
 		return "", errors.New(text_messages.TextErrorSettings)
@@ -118,7 +130,7 @@ func (s *ServiceImpl) AdminCommands(ctx context.Context, command string) (string
 		if err != nil {
 			return "", errors.New(text_messages.TextErrorSettings)
 		}
-		subs, err := s.subDatabase.GetActiveSubscriptions(ctx, userID)
+		subs, err := s.SubDatabase.GetActiveSubscriptions(ctx, userID)
 		if err != nil {
 			return "", err
 		}

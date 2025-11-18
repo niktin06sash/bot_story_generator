@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
 	"context"
@@ -14,12 +15,29 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
-	trace := s.getTrace(ctx)
+type SubscriptionServiceImpl struct {
+	SettingCache       SettingCache
+	SubDatabase        SubscriptionDatabase
+	DailyLimitCache    DailyLimitCache
+	DailyLimitDatabase DailyLimitDatabase
+	Logger             *logger.Logger
+}
+
+func NewSubscriptionService(settCache SettingCache, subdb SubscriptionDatabase, dcache DailyLimitCache, ddb DailyLimitDatabase, logger *logger.Logger) *SubscriptionServiceImpl {
+	return &SubscriptionServiceImpl{
+		SubDatabase:        subdb,
+		SettingCache:       settCache,
+		DailyLimitCache:    dcache,
+		DailyLimitDatabase: ddb,
+		Logger:             logger,
+	}
+}
+func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.PaymentData) error {
+	trace := getTrace(ctx, s.Logger)
 	place := "ValidatePreCheckout"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	price, err := s.getSubPrice(ctxTimeout, pd.UserID, trace, place)
+	price, err := getSubPrice(ctxTimeout, pd.UserID, trace, place, s.SettingCache, s.Logger)
 	if err != nil {
 		return err
 	}
@@ -27,7 +45,7 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 	var subb *models.Subscription
 	//параллельно делаем запросы для получения данных транзакции(если есть хоть одна ошибка - помечаем статус транзакции на rejected)
 	g.Go(func() error {
-		subscriptions, err := s.subDatabase.GetActiveSubscriptions(ctxTimeoutG, pd.UserID)
+		subscriptions, err := s.SubDatabase.GetActiveSubscriptions(ctxTimeoutG, pd.UserID)
 		if err != nil {
 			s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return errors.New(text_messages.TextErrorProcessPayment)
@@ -43,7 +61,7 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 		return nil
 	})
 	g.Go(func() error {
-		sub, err := s.subDatabase.GetStatusSubscription(ctxTimeoutG, pd.InvoicePayload, pd.UserID)
+		sub, err := s.SubDatabase.GetStatusSubscription(ctxTimeoutG, pd.InvoicePayload, pd.UserID)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "client: ") {
 				s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
@@ -62,7 +80,7 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 	err = g.Wait()
 	if err != nil {
 		if subb.Status != "rejected" {
-			rejerr := s.subDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
+			rejerr := s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
 			if rejerr != nil {
 				s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 				return errors.New(text_messages.TextErrorProcessPayment)
@@ -73,7 +91,7 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 	//сверяем цены
 	if price != pd.TotalAmount {
 		s.Logger.ZapLogger.Warn("Check Subscription Price", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		err = s.subDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
+		err = s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
 		if err != nil {
 			s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return errors.New(text_messages.TextErrorProcessPayment)
@@ -86,12 +104,12 @@ func (s *ServiceImpl) ValidatePreCheckout(ctx context.Context, pd *models.Paymen
 
 // Обработка команды покупки подписки
 // Проверяем, что нет активной подписки + добавляем в бд pending у подписки
-func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
-	trace := s.getTrace(ctx)
+func (s *SubscriptionServiceImpl) BuySubscription(ctx context.Context, userID int64) (*models.Subscription, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "BuySubscription"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	subscriptions, err := s.subDatabase.GetActiveSubscriptions(ctxTimeout, userID)
+	subscriptions, err := s.SubDatabase.GetActiveSubscriptions(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
@@ -115,12 +133,12 @@ func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64) (*model
 	nameSub := text_messages.NameBasicSubscription
 
 	payload := fmt.Sprintf("%s_%s_%d_%d", nameSub, currencySubscription, userID, time.Now().Unix())
-	price, err := s.getSubPrice(ctxTimeout, userID, trace, place)
+	price, err := getSubPrice(ctxTimeout, userID, trace, place, s.SettingCache, s.Logger)
 	if err != nil {
 		return nil, err
 	}
 	sub := models.NewSubscription(userID, nameSub, payload, status, currencySubscription, price)
-	err = s.subDatabase.AddSubscription(ctxTimeout, sub)
+	err = s.SubDatabase.AddSubscription(ctxTimeout, sub)
 	if err != nil {
 		s.Logger.ZapLogger.Error("AddSubscription", zap.Error(err), zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorProcessPayment)
@@ -128,20 +146,20 @@ func (s *ServiceImpl) BuySubscription(ctx context.Context, userID int64) (*model
 	s.Logger.ZapLogger.Info("Subscription pending successfully", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 	return sub, nil
 }
-func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
-	trace := s.getTrace(ctx)
+func (s *SubscriptionServiceImpl) CommitSubscription(ctx context.Context, pd *models.PaymentData) error {
+	trace := getTrace(ctx, s.Logger)
 	place := "CommitSubscription"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	// Подписка на 30 дней
 	start := time.Now()
 	end := start.AddDate(0, 0, 30)
-	err := s.subDatabase.PayedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
+	err := s.SubDatabase.PayedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
-	premiumDayLimitStr, err := s.settingCache.GetSetting(ctx, models.SettingKeyLimitPremiumDay)
+	premiumDayLimitStr, err := s.SettingCache.GetSetting(ctx, models.SettingKeyLimitPremiumDay)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
@@ -151,13 +169,13 @@ func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.Payment
 		s.Logger.ZapLogger.Error("Atoi limit.day.premium", zap.Error(convErr), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
-	err = s.daylimitCache.DeleteExceededLimit(ctxTimeout, pd.UserID)
+	err = s.DailyLimitCache.DeleteExceededLimit(ctxTimeout, pd.UserID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("DeleteExceededLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
 	limit := models.NewDailyLimit(pd.UserID, 0, premiumDayLimit)
-	err = s.daylimitDatabase.UpdateLimitCountDailyLimit(ctxTimeout, limit)
+	err = s.DailyLimitDatabase.UpdateLimitCountDailyLimit(ctxTimeout, limit)
 	if err != nil {
 		s.Logger.ZapLogger.Error("UpdateLimitCountDailyLimit", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
@@ -166,14 +184,14 @@ func (s *ServiceImpl) CommitSubscription(ctx context.Context, pd *models.Payment
 	return nil
 }
 
-func (s *ServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
-	trace := s.getTrace(ctx)
+func (s *SubscriptionServiceImpl) GetSubscriptionStatus(ctx context.Context, userID int64) (string, error) {
+	trace := getTrace(ctx, s.Logger)
 	place := "GetSubscriptionStatus"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	// TODO добавить обновление лимита на обычный, когда подписка закончилась
 
-	subscriptions, err := s.subDatabase.GetActiveSubscriptions(ctxTimeout, userID)
+	subscriptions, err := s.SubDatabase.GetActiveSubscriptions(ctxTimeout, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("GetActiveSubscriptions", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorGetSubscriptionStatus)

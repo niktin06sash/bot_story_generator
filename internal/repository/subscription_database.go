@@ -148,7 +148,7 @@ func (s *SubscriptionDatabaseImpl) GetActiveSubscriptions(ctx context.Context, u
 	}
 	defer rows.Close()
 
-	var subs []*models.Subscription
+	subs := make([]*models.Subscription, 0)
 	for rows.Next() {
 		sub := &models.Subscription{}
 		err := rows.Scan(&sub.UserID, &sub.Type, &sub.StartDate, &sub.EndDate, &sub.IsAutoRenewal, &sub.ChargeId, &sub.Payload, &sub.Status, &sub.Currency, &sub.Price)

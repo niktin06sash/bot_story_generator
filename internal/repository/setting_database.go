@@ -30,7 +30,7 @@ func (s *SettingDatabaseImpl) GetAllSettings(ctx context.Context) ([]*models.Set
 	}
 	defer rows.Close()
 
-	var res []*models.Setting
+	res := make([]*models.Setting, 0)
 	for rows.Next() {
 		var st models.Setting
 		if err := rows.Scan(&st.Key, &st.Value, &st.UpdatedAt, &st.UpdatedBy); err != nil {
