@@ -222,6 +222,10 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				r.createEditMessage(ctx, userID, msgID, "")
 				r.createOutboundMessage(ctx, userID, resp[0])
+				// TODO обработать вариант с возвращением списка длиной 1, означающий конец истории
+				if len(resp) == 1{
+					//TODO
+				}
 				r.createOutboundMessage(ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
 
@@ -391,7 +395,7 @@ func (r *StoryRouterImpl) routerWorker() {
 				}
 				r.logger.ZapLogger.Info("Admin executing command...", zap.Any("userID", userID), zap.String("command", data), zap.Any("arguments", msg.Arguments), zap.Any("traceID", trace.ID))
 				//* немного костыля
-				//* будем примать по примеру /command _ (nameSetting) 111111 XTR 11 (Value setting)
+				//* будем примать по примеру /command _(nameSetting)=111111 XTR 11 (Value setting)
 				//* потому что принимает от бота только один аргумент
 				fullCmd := data + " " + msg.Arguments[0].ValueSetting
 				resp, err := r.admin_service.AdminCommands(ctx, fullCmd)

@@ -108,7 +108,9 @@ var PossibleAnswersToStory = map[string]struct{}{
 // StoryNode представляет один элемент повествования с вариантами реакции
 type StoryNode struct {
 	Narrative string   `json:"narrative" jsonschema_description:"Дальнейшее развитие событий" jsonschema:"minLength=1000,maxLength=2200"`
+	ShortNarrative string `json:"short_narrative" jsonschema_description:"Краткое содержание narrative для хранения в БД" jsonschema:"minLength=10,maxLength=300"`
 	Choices   []string `json:"choices" jsonschema_description:"Пять вариантов действия героя, реагирующих на повествование" jsonschema:"minItems=5,maxItems=5"`
+	IsEnding  bool     `json:"is_ending" jsonschema_description:"Является ли данный узел концом истории (true — да, false — нет)"`
 }
 
 var StoryScriptResponseSchema = GenerateSchema[StoryNode]()

@@ -140,6 +140,7 @@ func (bot *Bot) readIncommingMessage() {
 				continue
 			}
 
+			// Handle CallbackQuery
 			if update.CallbackQuery != nil {
 				data := update.CallbackQuery.Data
 				userID := update.CallbackQuery.From.ID
@@ -157,17 +158,32 @@ func (bot *Bot) readIncommingMessage() {
 					//1 лог
 					bot.logger.ZapLogger.Info("Received Command", zap.Any("userID", userID), zap.Any("data", text), zap.Any("traceID", trace.ID))
 					command := update.Message.Command()
-					//передаем обновление: /changeSetting limit.day.premium=20
+					// Разбор аргументов через nameSetting = valueSetting, где valueSetting — всё, что после =
 					parts := strings.Fields(text)
 					if len(parts) > 1 {
 						var arguments []models.Argument
-						tokens := parts[1:]
-						for _, t := range tokens {
-							if strings.Contains(t, "=") {
-								kv := strings.SplitN(t, "=", 2)
-								arguments = append(arguments, models.Argument{NameSetting: kv[0], ValueSetting: kv[1]})
+
+						first := parts[1]
+
+						if strings.Contains(first, "=") {
+							eqIndex := strings.Index(first, "=")
+							nameSetting := first[:eqIndex]
+							valueSetting := first[eqIndex+1:]
+
+							// Добавляем остальные части значения — "2 3 4"
+							if len(parts) > 2 {
+								extra := strings.Join(parts[2:], " ")
+								if extra != "" {
+									valueSetting = valueSetting + " " + extra
+								}
 							}
+
+							arguments = append(arguments, models.Argument{
+								NameSetting:  nameSetting,
+								ValueSetting: valueSetting,
+							})
 						}
+
 						bot.router.AddComand(bot.ctx, command, userID, msgID, arguments, trace)
 					} else {
 						bot.router.AddComand(bot.ctx, command, userID, msgID, nil, trace)

@@ -77,15 +77,15 @@ var TextCommandForAdmin = []textCommandForHelp{
 	},
 	{
 		Command: "/addsub",
-		Text:    "➕ Добавить подписку: добавляет новую подписку пользователю. Формат: addsub _ userID type currency price duration_days",
+		Text:    "➕ Добавить подписку: добавляет новую подписку пользователю. Формат: /addsub _=userID type currency price duration_days",
 	},
 	{
 		Command: "/updatesub",
-		Text:    "✏️ Обновить подписку: обновляет существующую подписку пользователя. Формат: updatesub _ userID duration_days",
+		Text:    "✏️ Обновить подписку: обновляет существующую подписку пользователя. Формат: /updatesub _=userID duration_days",
 	},
 	{
 		Command: "/getsub",
-		Text:    "🔍 Посмотреть подписки: возвращает активные подписки пользователя. Формат: getsub _ userID",
+		Text:    "🔍 Посмотреть подписки: возвращает активные подписки пользователя. Формат: /getsub _=userID",
 	},
 }
 

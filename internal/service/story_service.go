@@ -230,6 +230,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		s.Logger.ZapLogger.Error("Unknown variant type", zap.String("type", variant.Type), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
+
 	// Получаем все сегменты истории
 	allStory, err := s.MsgDatabase.GetAllStorySegments(ctx, storyID)
 	if err != nil {
@@ -249,6 +250,14 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 	narrative := segment.Narrative
 	choice := segment.Choices
+
+	isEndStory := segment.IsEnding
+	shortNarrative := segment.ShortNarrative
+
+	if isEndStory {
+		//TODO сами завершаем историю
+	}
+
 	//создание контекста с таймаутом для изменения данных
 	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
 	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -260,7 +269,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
 	newUserMsg := models.NewStoryMessage(storyID, msg, "user")
-	newAssistantMsg := models.NewStoryMessage(storyID, narrative, "assistant")
+	newAssistantMsg := models.NewStoryMessage(storyID, shortNarrative, "assistant") // Сохраняем shortNarrative вместо narrative
 
 	// Сохраняем сообщения
 	err = s.MsgDatabase.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
