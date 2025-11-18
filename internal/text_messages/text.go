@@ -414,3 +414,17 @@ func FormatActiveSubscriptionsText(subs []*models.Subscription) string {
 	}
 	return resp
 }
+
+func FormatFinalStory(story string) string {
+	resp := Divider
+	resp += "🏁 Финал истории\n"
+	resp += Divider
+
+	resp += fmt.Sprintf("%s\n", story)
+
+	resp += Divider
+	resp += "✨ Чтобы начать новое приключение, используйте команду /newstory"
+	resp += Divider
+
+	return resp
+}

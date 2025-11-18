@@ -254,8 +254,18 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	isEndStory := segment.IsEnding
 	shortNarrative := segment.ShortNarrative
 
+	// Завершаем историю
 	if isEndStory {
-		//TODO сами завершаем историю
+		resp := text_messages.FormatFinalStory(narrative)
+
+		//* НЕ знаю, нужно ли писать какой то контекст
+		err := s.StoryDatabase.StopStory(ctx, userID)
+		if err != nil {
+			s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
+		}
+
+		return []string{resp}, nil
 	}
 
 	//создание контекста с таймаутом для изменения данных

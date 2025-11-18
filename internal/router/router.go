@@ -221,12 +221,14 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.createEditMessage(ctx, userID, msgID, "")
-				r.createOutboundMessage(ctx, userID, resp[0])
-				// TODO обработать вариант с возвращением списка длиной 1, означающий конец истории
+				
+				// Если мы сами завершили историю, потому что ИИ выдал аргумент завершения истории
 				if len(resp) == 1{
-					//TODO
+					r.createOutboundMessage(ctx, userID, resp[0])
+				}else{
+					r.createOutboundMessage(ctx, userID, resp[0])
+					r.createOutboundMessage(ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				}
-				r.createOutboundMessage(ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				r.cleanUserState(userID)
 
 			} else if data == "help" {
