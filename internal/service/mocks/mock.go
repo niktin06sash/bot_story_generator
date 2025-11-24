@@ -179,17 +179,17 @@ func (mr *MockStoryDatabaseMockRecorder) GetActiveStories(ctx, userID any) *gomo
 }
 
 // StopStory mocks base method.
-func (m *MockStoryDatabase) StopStory(ctx context.Context, userID int64) error {
+func (m *MockStoryDatabase) StopStory(ctx context.Context, tx pgx.Tx, userID int64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StopStory", ctx, userID)
+	ret := m.ctrl.Call(m, "StopStory", ctx, tx, userID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // StopStory indicates an expected call of StopStory.
-func (mr *MockStoryDatabaseMockRecorder) StopStory(ctx, userID any) *gomock.Call {
+func (mr *MockStoryDatabaseMockRecorder) StopStory(ctx, tx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StopStory", reflect.TypeOf((*MockStoryDatabase)(nil).StopStory), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StopStory", reflect.TypeOf((*MockStoryDatabase)(nil).StopStory), ctx, tx, userID)
 }
 
 // MockVariantDatabase is a mock of VariantDatabase interface.
