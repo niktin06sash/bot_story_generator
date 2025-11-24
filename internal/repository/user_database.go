@@ -20,6 +20,9 @@ func NewUserDatabase(db *database.DBObject) *UserDatabaseImpl {
 	}
 }
 func (s *UserDatabaseImpl) AddUser(ctx context.Context, user *models.User) error {
+	if user == nil {
+		return fmt.Errorf("server: user is nil")
+	}
 	query := `
         INSERT INTO users (ID)
         VALUES ($1)

@@ -65,6 +65,10 @@ func (s *SettingServiceImpl) SetSetting(ctx context.Context, key string, value s
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("key", key), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorSettings)
 	}
+	if tx == nil {
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(errors.New("returning nil transaction")), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		return "", errors.New(text_messages.TextErrorSettings)
+	}
 	setting := models.NewSetting(key, value, updatedBy)
 	err = s.SettingDatabase.SetSetting(ctxTimeout, tx, setting)
 	if err != nil {

@@ -19,6 +19,9 @@ func NewVariantDatabase(db *database.DBObject) *VariantDatabaseImpl {
 	}
 }
 func (s *VariantDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error {
+	if variant == nil {
+		return fmt.Errorf("server: variant is nil")
+	}
 	query := `
 		INSERT INTO storiesVariants (storyID, data, type)
     	VALUES ($1, $2, $3)
@@ -31,6 +34,9 @@ func (s *VariantDatabaseImpl) AddVariant(ctx context.Context, tx pgx.Tx, variant
 }
 
 func (s *VariantDatabaseImpl) UpdateVariant(ctx context.Context, tx pgx.Tx, variant *models.StoryVariant) error {
+	if variant == nil {
+		return fmt.Errorf("server: variant is nil")
+	}
 	query := `
 		UPDATE storiesVariants
 		SET data = $2, type = $3

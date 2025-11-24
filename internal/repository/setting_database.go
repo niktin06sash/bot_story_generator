@@ -62,6 +62,9 @@ func (s *SettingDatabaseImpl) GetSetting(ctx context.Context, key string) (*mode
 }
 
 func (s *SettingDatabaseImpl) SetSetting(ctx context.Context, tx pgx.Tx, setting *models.Setting) error {
+	if setting == nil {
+		return fmt.Errorf("server: setting is nil")
+	}
 	query := `
 		INSERT INTO settings (key, value, updated_at, updated_by)
 		VALUES ($1, $2, now(), $3)

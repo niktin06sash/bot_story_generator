@@ -4,6 +4,7 @@ import (
 	"bot_story_generator/internal/database"
 	"bot_story_generator/internal/models"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,9 @@ func NewMessageDatabase(db *database.DBObject) *MessageDatabaseImpl {
 	}
 }
 func (s *MessageDatabaseImpl) AddStoryMessages(ctx context.Context, tx pgx.Tx, msgs []*models.StoryMessage) error {
+	if msgs == nil {
+		return errors.New("messages is nil")
+	}
 	//делаем batch вместо двух запросов insert
 	batch := &pgx.Batch{}
 	query := `
@@ -26,6 +30,9 @@ func (s *MessageDatabaseImpl) AddStoryMessages(ctx context.Context, tx pgx.Tx, m
 		VALUES ($1, $2, $3)
 	`
 	for _, msg := range msgs {
+		if msg == nil {
+			return fmt.Errorf("server: message is nil")
+		}
 		batch.Queue(query, msg.StoryID, msg.Data, msg.Type)
 	}
 	br := tx.SendBatch(ctx, batch)

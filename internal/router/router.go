@@ -108,44 +108,45 @@ func (r *StoryRouterImpl) paymentWorker() {
 		case <-r.ctx.Done():
 			return
 		case data, ok := <-r.chan_payments:
-			{
-				if !ok {
-					return
-				}
-				r.mux.Lock()
-				if _, ok := r.userState[data.UserID]; ok {
-					r.mux.Unlock()
+			if !ok {
+				return
+			}
+			if data == nil {
+				continue
+			}
+			r.mux.Lock()
+			if _, ok := r.userState[data.UserID]; ok {
+				r.mux.Unlock()
+				continue
+			}
+			r.userState[data.UserID] = struct{}{}
+			r.mux.Unlock()
+			ctx := context.WithValue(r.ctx, models.TraceKey, data.Trace)
+			if data.ChargeID == "" && data.QueryID != "" {
+				//TODO добавить таймаут на выполнение
+				r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
+				err := r.sub_service.ValidatePreCheckout(ctx, data)
+				if err != nil {
+					data.Error = err
+					r.createPaymentMessage(data)
+					r.cleanUserState(data.UserID)
 					continue
 				}
-				r.userState[data.UserID] = struct{}{}
-				r.mux.Unlock()
-				ctx := context.WithValue(r.ctx, models.TraceKey, data.Trace)
-				if data.ChargeID == "" && data.QueryID != "" {
-					//TODO добавить таймаут на выполнение
-					r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.sub_service.ValidatePreCheckout(ctx, data)
-					if err != nil {
-						data.Error = err
-						r.createPaymentMessage(data)
-						r.cleanUserState(data.UserID)
-						continue
-					}
-					r.createPaymentMessage(data)
-					r.cleanUserState(data.UserID)
+				r.createPaymentMessage(data)
+				r.cleanUserState(data.UserID)
 
-				} else if data.ChargeID != "" && data.QueryID == "" {
-					//TODO добавить таймаут на выполнение
-					r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
-					err := r.sub_service.CommitSubscription(ctx, data)
-					if err != nil {
-						data.Error = err
-						r.createPaymentMessage(data)
-						r.cleanUserState(data.UserID)
-						continue
-					}
+			} else if data.ChargeID != "" && data.QueryID == "" {
+				//TODO добавить таймаут на выполнение
+				r.logger.ZapLogger.Info("Commiting Subscription...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
+				err := r.sub_service.CommitSubscription(ctx, data)
+				if err != nil {
+					data.Error = err
 					r.createPaymentMessage(data)
 					r.cleanUserState(data.UserID)
+					continue
 				}
+				r.createPaymentMessage(data)
+				r.cleanUserState(data.UserID)
 			}
 		}
 	}
@@ -221,11 +222,11 @@ func (r *StoryRouterImpl) routerWorker() {
 					continue
 				}
 				r.createEditMessage(ctx, userID, msgID, "")
-				
+
 				// Если мы сами завершили историю, потому что ИИ выдал аргумент завершения истории
-				if len(resp) == 1{
+				if len(resp) == 1 {
 					r.createOutboundMessage(ctx, userID, resp[0])
-				}else{
+				} else {
 					r.createOutboundMessage(ctx, userID, resp[0])
 					r.createOutboundMessage(ctx, userID, resp[1], models.NewButtonArg("userChoice_", []string{"1", "2", "3", "4", "5"}))
 				}

@@ -71,7 +71,7 @@ func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *m
 			return errors.New(text_messages.TextErrorProcessPayment)
 		}
 		subb = sub
-		if sub.Status == "rejected" {
+		if sub != nil && sub.Status == "rejected" {
 			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("attempt to repeat send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return errors.New(text_messages.InvalidPaymentData)
 		}
@@ -79,7 +79,7 @@ func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *m
 	})
 	err = g.Wait()
 	if err != nil {
-		if subb.Status != "rejected" {
+		if subb != nil && subb.Status != "rejected" {
 			rejerr := s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
 			if rejerr != nil {
 				s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
@@ -89,7 +89,7 @@ func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *m
 		return err
 	}
 	//сверяем цены
-	if price != pd.TotalAmount {
+	if pd != nil && price != pd.TotalAmount {
 		s.Logger.ZapLogger.Warn("Check Subscription Price", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		err = s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
 		if err != nil {
@@ -156,7 +156,7 @@ func (s *SubscriptionServiceImpl) CommitSubscription(ctx context.Context, pd *mo
 	end := start.AddDate(0, 0, 30)
 	err := s.SubDatabase.PayedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID, start, end, pd.ChargeID)
 	if err != nil {
-		s.Logger.ZapLogger.Error("UpdatePendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		s.Logger.ZapLogger.Error("PayedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return errors.New(text_messages.TextErrorActivateSubscription)
 	}
 	premiumDayLimitStr, err := s.SettingCache.GetSetting(ctx, models.SettingKeyLimitPremiumDay)
@@ -205,7 +205,10 @@ func (s *SubscriptionServiceImpl) GetSubscriptionStatus(ctx context.Context, use
 	}
 
 	sub := subscriptions[0]
-	typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
-	s.Logger.ZapLogger.Info("Subscription received successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-	return text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData), nil
+	if sub != nil {
+		typeSub, startData, endData := sub.Type, sub.StartDate, sub.EndDate
+		s.Logger.ZapLogger.Info("Subscription received successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		return text_messages.CreateSubscriptionStatusMessage(typeSub, startData, endData), nil
+	}
+	return "", errors.New(text_messages.TextErrorGetSubscriptionStatus)
 }

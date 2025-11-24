@@ -21,6 +21,9 @@ func NewSubscriptionDatabase(db *database.DBObject) *SubscriptionDatabaseImpl {
 	}
 }
 func (s *SubscriptionDatabaseImpl) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
+	if subscription == nil {
+		return fmt.Errorf("server: subscription is nil")
+	}
 	query := `
 		INSERT INTO subscriptions (payload, chargeId, userID, type, status, startDate, endDate, isAutoRenewal, currency, price)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -45,6 +48,9 @@ func (s *SubscriptionDatabaseImpl) AddSubscription(ctx context.Context, subscrip
 
 // UpdateSubscription обновляет данные подписки пользователя
 func (s *SubscriptionDatabaseImpl) UpdateSubscription(ctx context.Context, subscription *models.Subscription) error {
+	if subscription == nil {
+		return fmt.Errorf("server: subscription is nil")
+	}
 	query := `
 		UPDATE subscriptions
 		SET

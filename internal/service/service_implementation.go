@@ -21,7 +21,7 @@ type UserDatabase interface {
 }
 type StoryDatabase interface {
 	GetActiveStories(ctx context.Context, userID int64) ([]*models.Story, error)
-	StopStory(ctx context.Context, userID int64) error
+	StopStory(ctx context.Context, tx pgx.Tx, userID int64) error
 	AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error)
 }
 type VariantDatabase interface {

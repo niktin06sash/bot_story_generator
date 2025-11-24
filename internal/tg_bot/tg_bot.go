@@ -334,6 +334,9 @@ func (bot *Bot) sendPaymentData(ch chan *models.PaymentData) {
 			if !ok {
 				return
 			}
+			if data == nil {
+				continue
+			}
 			trace := data.Trace
 			if data.Error != nil && data.ChargeID == "" && data.QueryID != "" {
 				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID, trace)
@@ -561,6 +564,9 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 
 // * Функция отправки инвойса с подпиской
 func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription, trace models.Trace) {
+	if sub == nil {
+		return
+	}
 	name := text_messages.NameBasicSubscription
 	description := text_messages.DescriptionBasicSubscription
 	var provideToken string

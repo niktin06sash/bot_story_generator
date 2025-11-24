@@ -88,7 +88,10 @@ func (s *StoryServiceImpl) CreateStory(ctx context.Context, userID int64) ([]str
 		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
+	if tx == nil {
+		s.Logger.ZapLogger.Error("BeginTx", zap.Error(errors.New("returning nil transaction")), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		return nil, errors.New(text_messages.TextErrorCreateTask)
+	}
 	// Создаем историю с пустыми данными(так как ждем выбор в следующем действии пользователя)
 	story := models.NewStory(userID, nil)
 	storyId, err := s.StoryDatabase.AddStory(ctxTimeout, tx, story)
@@ -165,7 +168,7 @@ func (s *StoryServiceImpl) StopStoryChoice(ctx context.Context, userID int64, ar
 	place := "StopStoryChoice"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	err := s.StoryDatabase.StopStory(ctxTimeout, userID)
+	err := s.StoryDatabase.StopStory(ctxTimeout, nil, userID)
 	if err != nil {
 		s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		return "", errors.New(text_messages.TextErrorCreateTask)
@@ -203,136 +206,156 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	}
 
 	variant := variants[0]
-	storyID := variant.StoryID
-	var msg string
-	switch variant.Type {
-	case "characters":
-		var fantasyCharacters models.FantasyCharacters
-		if err := json.Unmarshal(variant.Data, &fantasyCharacters); err != nil {
-			s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+	//безопасно обращаемся к значению, чтобы избежать возможности появления паники
+	if variant != nil {
+		storyID := variant.StoryID
+		var msg string
+		switch variant.Type {
+		case "characters":
+			var fantasyCharacters models.FantasyCharacters
+			if err := json.Unmarshal(variant.Data, &fantasyCharacters); err != nil {
+				s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+			userVariant := fantasyCharacters.Characters[number_choice-1]
+			msg = text_messages.CreateHeroMessage(&userVariant)
+			//3 лог
+			s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		case "actions":
+			var choices []string
+			if err := json.Unmarshal(variant.Data, &choices); err != nil {
+				s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+			userVariant := models.Extension{Narrative: choices[number_choice-1]}
+			msg = text_messages.CreateExtensionMessage(&userVariant)
+			//3 лог
+			s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		default:
+			s.Logger.ZapLogger.Error("Unknown variant type", zap.String("type", variant.Type), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
-		userVariant := fantasyCharacters.Characters[number_choice-1]
-		msg = text_messages.CreateHeroMessage(&userVariant)
-		//3 лог
-		s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-	case "actions":
-		var choices []string
-		if err := json.Unmarshal(variant.Data, &choices); err != nil {
-			s.Logger.ZapLogger.Error("Unmarshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-			return nil, errors.New(text_messages.TextErrorCreateTask)
-		}
-		userVariant := models.Extension{Narrative: choices[number_choice-1]}
-		msg = text_messages.CreateExtensionMessage(&userVariant)
-		//3 лог
-		s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-	default:
-		s.Logger.ZapLogger.Error("Unknown variant type", zap.String("type", variant.Type), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
 
-	// Получаем все сегменты истории
-	allStory, err := s.MsgDatabase.GetAllStorySegments(ctx, storyID)
-	if err != nil {
-		s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
-	// Добавляем выбор пользователя в формат истории, в бд добавляем потом, во время транзакции
-	storySegment := &models.StoryMessage{Data: msg, Type: "user"}
-	allStory = append(allStory, storySegment)
-
-	// Генериуем ответ ии
-	segment, err := s.StoryAI.GenerateNextStorySegment(ctx, allStory)
-	if err != nil {
-		s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	narrative := segment.Narrative
-	choice := segment.Choices
-
-	isEndStory := segment.IsEnding
-	shortNarrative := segment.ShortNarrative
-
-	// Завершаем историю
-	if isEndStory {
-		resp := text_messages.FormatFinalStory(narrative)
-
-		//* НЕ знаю, нужно ли писать какой то контекст
-		err := s.StoryDatabase.StopStory(ctx, userID)
+		// Получаем все сегменты истории
+		allStory, err := s.MsgDatabase.GetAllStorySegments(ctx, storyID)
 		if err != nil {
-			s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			s.Logger.ZapLogger.Error("GetAllStorySegments", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
 
-		return []string{resp}, nil
-	}
+		// Добавляем выбор пользователя в формат истории, в бд добавляем потом, во время транзакции
+		storySegment := &models.StoryMessage{Data: msg, Type: "user"}
+		allStory = append(allStory, storySegment)
 
-	//создание контекста с таймаутом для изменения данных
-	//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
-	ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	// Создание транзакции для консистентности данных
-	tx, err := s.TxManager.BeginTx(ctxTimeout)
-	if err != nil {
-		s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-	newUserMsg := models.NewStoryMessage(storyID, msg, "user")
-	newAssistantMsg := models.NewStoryMessage(storyID, shortNarrative, "assistant") // Сохраняем shortNarrative вместо narrative
-
-	// Сохраняем сообщения
-	err = s.MsgDatabase.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
-	if err != nil {
-		s.Logger.ZapLogger.Error("AddStoryMessages", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
-		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+		// Генериуем ответ ии
+		segment, err := s.StoryAI.GenerateNextStorySegment(ctx, allStory)
+		if err != nil {
+			s.Logger.ZapLogger.Error("GenerateNextStorySegment", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			return nil, errors.New(text_messages.TextErrorCreateTask)
 		}
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
+		//безопасно обращаемся к значению, чтобы избежать возможности появления паники
+		if segment != nil {
+			narrative := segment.Narrative
+			choice := segment.Choices
 
-	// Обновляем вариант
-	choicesData, err := json.Marshal(choice)
-	if err != nil {
-		s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
-		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			isEndStory := segment.IsEnding
+			shortNarrative := segment.ShortNarrative
+			//создание контекста с таймаутом для изменения данных(чтобы не зависало соединение в случае чего)
+			//TODO выставить таймер для всей операции, но пока не получится из-за ИИ(долгое выполнение)
+			ctxTimeout, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			// Создание транзакции для консистентности данных
+			tx, err := s.TxManager.BeginTx(ctxTimeout)
+			if err != nil {
+				s.Logger.ZapLogger.Error("BeginTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+			if tx == nil {
+				s.Logger.ZapLogger.Error("BeginTx", zap.Error(errors.New("returning nil transaction")), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+			if isEndStory {
+				err := s.StoryDatabase.StopStory(ctxTimeout, tx, userID)
+				if err != nil {
+					s.Logger.ZapLogger.Error("StopStory", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+					return nil, errors.New(text_messages.TextErrorCreateTask)
+				}
+				err = updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, trace, place, s.DailyLimitDatabase, s.TxManager, s.Logger)
+				if err != nil {
+					return nil, err
+				}
+				err = s.TxManager.CommitTx(ctxTimeout, tx)
+				if err != nil {
+					s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+					rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
+					if rollbackErr != nil {
+						s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+					}
+					return nil, errors.New(text_messages.TextErrorCreateTask)
+				}
+				resp := text_messages.FormatFinalStory(narrative)
+				return []string{resp}, nil
+			}
+
+			newUserMsg := models.NewStoryMessage(storyID, msg, "user")
+			newAssistantMsg := models.NewStoryMessage(storyID, shortNarrative, "assistant") // Сохраняем shortNarrative вместо narrative
+
+			// Сохраняем сообщения
+			err = s.MsgDatabase.AddStoryMessages(ctxTimeout, tx, []*models.StoryMessage{newUserMsg, newAssistantMsg})
+			if err != nil {
+				s.Logger.ZapLogger.Error("AddStoryMessages", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
+				if rollbackErr != nil {
+					s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				}
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+
+			// Обновляем вариант
+			choicesData, err := json.Marshal(choice)
+			if err != nil {
+				s.Logger.ZapLogger.Error("Marshal", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
+				if rollbackErr != nil {
+					s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				}
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+
+			addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
+			if err = s.VariantDatabase.UpdateVariant(ctxTimeout, tx, addingVariant); err != nil {
+				s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
+				if rollbackErr != nil {
+					s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				}
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+
+			// Обновляем дневной лимит
+			err = updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, trace, place, s.DailyLimitDatabase, s.TxManager, s.Logger)
+			if err != nil {
+				return nil, err
+			}
+
+			// Делаем подтверждение транзакции после изменения таблиц
+			err = s.TxManager.CommitTx(ctxTimeout, tx)
+			if err != nil {
+				s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
+				if rollbackErr != nil {
+					s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+				}
+				return nil, errors.New(text_messages.TextErrorCreateTask)
+			}
+
+			// Формируем ответ
+			resp := text_messages.TextNarrativeWithChoices(narrative, choice)
+			//4 лог
+			s.Logger.ZapLogger.Info("User's choice made successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			return []string{msg, resp}, nil
 		}
-		return nil, errors.New(text_messages.TextErrorCreateTask)
 	}
-
-	addingVariant := models.NewStoryVariant(storyID, "actions", choicesData)
-	if err = s.VariantDatabase.UpdateVariant(ctxTimeout, tx, addingVariant); err != nil {
-		s.Logger.ZapLogger.Error("UpdateVariant", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
-		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		}
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
-	// Обновляем дневной лимит
-	err = updateOrAddDailyLimit(ctxTimeout, tx, limit, 1, trace, place, s.DailyLimitDatabase, s.TxManager, s.Logger)
-	if err != nil {
-		return nil, err
-	}
-
-	// Делаем подтверждение транзакции после изменения таблиц
-	err = s.TxManager.CommitTx(ctxTimeout, tx)
-	if err != nil {
-		s.Logger.ZapLogger.Error("CommitTx", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		rollbackErr := s.TxManager.RollbackTx(context.Background(), tx)
-		if rollbackErr != nil {
-			s.Logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		}
-		return nil, errors.New(text_messages.TextErrorCreateTask)
-	}
-
-	// Формируем ответ
-	resp := text_messages.TextNarrativeWithChoices(narrative, choice)
-	//4 лог
-	s.Logger.ZapLogger.Info("User's choice made successfully", zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
-	return []string{msg, resp}, nil
+	//проверь, может в каких-то местах мы еще обращаемся к полю значения - добавить такое же условное ветвление
+	return nil, errors.New(text_messages.TextErrorCreateTask)
 }

@@ -15,6 +15,13 @@ import (
 )
 
 func updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, step int, trace models.Trace, LogPlace string, daydb DailyLimitDatabase, txman TxManager, logger *logger.Logger) error {
+	if limit == nil {
+		rollbackErr := txman.RollbackTx(context.Background(), tx)
+		if rollbackErr != nil {
+			logger.ZapLogger.Error("RollbackTx", zap.Error(rollbackErr), zap.Any("traceID", trace.ID), zap.Any("place", LogPlace))
+		}
+		return errors.New(text_messages.TextErrorCreateTask)
+	}
 	if limit.Count == 0 {
 		limit.Count += step
 		err := daydb.AddDailyLimit(ctx, tx, limit)

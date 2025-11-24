@@ -47,6 +47,9 @@ func (s *StoryDatabaseImpl) GetActiveStories(ctx context.Context, userID int64) 
 }
 
 func (s *StoryDatabaseImpl) AddStory(ctx context.Context, tx pgx.Tx, story *models.Story) (int, error) {
+	if story == nil {
+		return 0, fmt.Errorf("server: story is nil")
+	}
 	query := `
 		INSERT INTO stories (userID, data)
     	VALUES ($1, $2)
@@ -61,13 +64,20 @@ func (s *StoryDatabaseImpl) AddStory(ctx context.Context, tx pgx.Tx, story *mode
 	return storyID, nil
 }
 
-func (s *StoryDatabaseImpl) StopStory(ctx context.Context, userID int64) error {
+func (s *StoryDatabaseImpl) StopStory(ctx context.Context, tx pgx.Tx, userID int64) error {
 	query := `
 		UPDATE stories 
 		SET isActive = FALSE 
 		WHERE userID = $1 AND isActive = TRUE
 	`
-	_, err := s.databaseclient.Pool.Exec(ctx, query, userID)
+	if tx == nil {
+		_, err := s.databaseclient.Pool.Exec(ctx, query, userID)
+		if err != nil {
+			return fmt.Errorf("server: database error: %w", err)
+		}
+		return nil
+	}
+	_, err := tx.Exec(ctx, query, userID)
 	if err != nil {
 		return fmt.Errorf("server: database error: %w", err)
 	}

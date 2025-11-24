@@ -37,6 +37,9 @@ func (s *DailyLimitDatabaseImpl) GetDailyLimit(ctx context.Context, userID int64
 }
 
 func (s *DailyLimitDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
+	if dailyLimit == nil {
+		return fmt.Errorf("server: dailyLimit is nil")
+	}
 	query := `
         INSERT INTO dailyLimits (userID, count, limitCount)
         VALUES ($1, $2, $3)
@@ -49,6 +52,9 @@ func (s *DailyLimitDatabaseImpl) AddDailyLimit(ctx context.Context, tx pgx.Tx, d
 }
 
 func (s *DailyLimitDatabaseImpl) UpdateCountDailyLimit(ctx context.Context, tx pgx.Tx, dailyLimit *models.DailyLimit) error {
+	if dailyLimit == nil {
+		return fmt.Errorf("server: dailyLimit is nil")
+	}
 	query := `
         UPDATE dailyLimits 
         SET count = $1
@@ -61,6 +67,9 @@ func (s *DailyLimitDatabaseImpl) UpdateCountDailyLimit(ctx context.Context, tx p
 	return nil
 }
 func (s *DailyLimitDatabaseImpl) UpdateLimitCountDailyLimit(ctx context.Context, dailyLimit *models.DailyLimit) error {
+	if dailyLimit == nil {
+		return fmt.Errorf("server: dailyLimit is nil")
+	}
 	query := `
         UPDATE dailyLimits 
         SET limitCount = $1

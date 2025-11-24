@@ -26,6 +26,9 @@ func (s *SettingCacheImpl) LoadCacheData(ctx context.Context, settings []*models
 	allName := models.NameSettingKeys()
 	// Записываем каждую настройку в Redis с ключом settings:%s<key>
 	for _, st := range settings {
+		if st == nil {
+			return fmt.Errorf("setting is nil")
+		}
 		key := fmt.Sprintf(s.cacheclient.SettingsKey, st.Key)
 		// Сохраняем значение как строку без TTL (пока)
 		err := s.cacheclient.Connect.Set(ctx, key, st.Value, 0).Err()
