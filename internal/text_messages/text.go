@@ -251,6 +251,12 @@ func CreateExtensionMessage(ext *models.Extension) string {
 	return msg
 }
 
+func CreateExtensionMessageInDataBase(ext *models.Extension) string {
+	var msg string
+	msg += ext.Narrative + "\n"
+	return msg
+}
+
 var TextSupportInfo = `Заглушка support`
 
 var TextTermsOfService = `Заглушка terms`

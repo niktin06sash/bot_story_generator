@@ -212,6 +212,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 	if variant != nil {
 		storyID := variant.StoryID
 		var msg string
+		var msgInBD string
 		switch variant.Type {
 		case "characters":
 			var fantasyCharacters models.FantasyCharacters
@@ -221,6 +222,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 			}
 			userVariant := fantasyCharacters.Characters[number_choice-1]
 			msg = text_messages.CreateHeroMessage(&userVariant)
+			msgInBD = msg
 			//3 лог
 			s.Logger.ZapLogger.Info("Fetched story variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		case "actions":
@@ -231,6 +233,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 			}
 			userVariant := models.Extension{Narrative: choices[number_choice-1]}
 			msg = text_messages.CreateExtensionMessage(&userVariant)
+			msgInBD = text_messages.CreateExtensionMessageInDataBase(&userVariant)
 			//3 лог
 			s.Logger.ZapLogger.Info("Fetched action variant", zap.Any("variant", userVariant), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", place))
 		default:
@@ -300,7 +303,7 @@ func (s *StoryServiceImpl) UserChoice(ctx context.Context, userID int64, num str
 				return []string{resp}, nil
 			}
 
-			newUserMsg := models.NewStoryMessage(storyID, msg, "user")
+			newUserMsg := models.NewStoryMessage(storyID, msgInBD, "user") // Сохраняем не оформленную версию msg
 			newAssistantMsg := models.NewStoryMessage(storyID, shortNarrative, "assistant") // Сохраняем shortNarrative вместо narrative
 
 			// Сохраняем сообщения

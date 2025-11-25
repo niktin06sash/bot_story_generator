@@ -83,13 +83,13 @@ func GenerateSchema[T any]() interface{} {
 
 // Hero представляет фэнтезийного персонажа
 type Hero struct {
-	Name       string   `json:"name" jsonschema_description:"Имя персонажа, подходящее для фэнтези-сеттинга (короткое/запоминающееся)" jsonschema:"minLength=1,maxLength=40"`
-	Race       string   `json:"race" jsonschema_description:"Раса (например: человек, эльф, орк, драконорожденный и т.п.)" jsonschema:"minLength=1,maxLength=50"`
+	Name       string   `json:"name" jsonschema_description:"Имя персонажа, подходящее для фэнтези-сеттинга (короткое/запоминающееся)" jsonschema:"minLength=2,maxLength=40"`
+	Race       string   `json:"race" jsonschema_description:"Раса (например: человек, эльф, орк, драконорожденный и т.п.)" jsonschema:"minLength=1,maxLength=40"`
 	Class      string   `json:"class" jsonschema_description:"Класс или профессия (маг, воин, охотник, некромант и т. д.)" jsonschema:"minLength=1,maxLength=50"`
-	Appearance string   `json:"appearance" jsonschema_description:"Краткое описание внешности (2–3 предложения)" jsonschema:"minLength=20,maxLength=250"`
+	Appearance string   `json:"appearance" jsonschema_description:"Краткое описание внешности (2–3 предложения)" jsonschema:"minLength=30,maxLength=350"`
 	Traits     []string `json:"traits" jsonschema_description:"Основные черты характера (2–3 пункта)" jsonschema:"minItems=2,maxItems=3"`
-	Feature    string   `json:"feature" jsonschema_description:"Ключевая особенность или сила, делающая персонажа уникальным" jsonschema:"minLength=15,maxLength=250"`
-	Biography  string   `json:"biography" jsonschema_description:"Короткий фрагмент биографии (2–5 предложений, атмосферно, без лишней воды)" jsonschema:"minLength=20,maxLength=500"`
+	Feature    string   `json:"feature" jsonschema_description:"Ключевая особенность или сила, делающая персонажа уникальным" jsonschema:"minLength=25,maxLength=250"`
+	Biography  string   `json:"biography" jsonschema_description:"Короткий фрагмент биографии (2–5 предложений, атмосферно, без лишней воды)" jsonschema:"minLength=50,maxLength=500"`
 }
 
 // FantasyCharacters представляет массив персонажей
@@ -107,8 +107,8 @@ var PossibleAnswersToStory = map[string]struct{}{
 
 // StoryNode представляет один элемент повествования с вариантами реакции
 type StoryNode struct {
-	Narrative string   `json:"narrative" jsonschema_description:"Дальнейшее развитие событий" jsonschema:"minLength=1000,maxLength=2200"`
-	ShortNarrative string `json:"short_narrative" jsonschema_description:"Краткое содержание narrative для хранения в БД" jsonschema:"minLength=10,maxLength=300"`
+	Narrative string   `json:"narrative" jsonschema_description:"Дальнейшее развитие событий" jsonschema:"minLength=800,maxLength=1200"`
+	ShortNarrative string `json:"short_narrative" jsonschema_description:"Краткое содержание narrative: перечисли только ключевые события, мотивации и последствия. Ноль украшений, ноль связок, телеграфный формат. Максимум информации в минимуме слов." jsonschema:"minLength=15,maxLength=200"`
 	Choices   []string `json:"choices" jsonschema_description:"Пять вариантов действия героя, реагирующих на повествование" jsonschema:"minItems=5,maxItems=5"`
 	IsEnding  bool     `json:"is_ending" jsonschema_description:"Является ли данный узел концом истории (true — да, false — нет)"`
 }
