@@ -33,8 +33,5 @@ func (s *DailyLimitCacheImpl) CheckExceededLimit(ctx context.Context, userID int
 func (s *DailyLimitCacheImpl) DeleteExceededLimit(ctx context.Context, userID int64) error {
 	key := fmt.Sprintf(s.cacheclient.ExceededLimitKey, userID)
 	_, err := s.cacheclient.Connect.Del(ctx, key).Result()
-	if err != nil {
-		return err
-	}
 	return err
 }

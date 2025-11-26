@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
@@ -151,4 +152,12 @@ func getTrace(ctx context.Context, logger *logger.Logger) models.Trace {
 		return models.Trace{}
 	}
 	return trace
+}
+func asyncRejectSub(pd *models.PaymentData, place string, sdb SubscriptionDatabase, logger *logger.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rejerr := sdb.RejectedPendingSubscription(ctx, pd.InvoicePayload, pd.UserID)
+	if rejerr != nil {
+		logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(rejerr), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", pd.Trace.ID), zap.Any("place", place))
+	}
 }

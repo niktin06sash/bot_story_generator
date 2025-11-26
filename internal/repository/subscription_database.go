@@ -141,8 +141,9 @@ func (s *SubscriptionDatabaseImpl) RejectedPendingSubscription(ctx context.Conte
 
 // GetUserSubscription возвращает подписку пользователя по userID
 func (s *SubscriptionDatabaseImpl) GetActiveSubscriptions(ctx context.Context, userID int64) ([]*models.Subscription, error) {
+	//удалил получение серверных данных подписки
 	query := `
-		SELECT userID, type, startDate, endDate, isAutoRenewal, chargeId, payload, status, currency, price
+		SELECT userID, type, startDate, endDate
         FROM subscriptions 
         WHERE userID = $1
         AND endDate > NOW()
@@ -157,7 +158,7 @@ func (s *SubscriptionDatabaseImpl) GetActiveSubscriptions(ctx context.Context, u
 	subs := make([]*models.Subscription, 0)
 	for rows.Next() {
 		sub := &models.Subscription{}
-		err := rows.Scan(&sub.UserID, &sub.Type, &sub.StartDate, &sub.EndDate, &sub.IsAutoRenewal, &sub.ChargeId, &sub.Payload, &sub.Status, &sub.Currency, &sub.Price)
+		err := rows.Scan(&sub.UserID, &sub.Type, &sub.StartDate, &sub.EndDate)
 		if err != nil {
 			return nil, fmt.Errorf("server: database error: %w", err)
 		}

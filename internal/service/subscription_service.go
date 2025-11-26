@@ -37,10 +37,6 @@ func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *m
 	place := "ValidatePreCheckout"
 	ctxTimeout, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	price, err := getSubPrice(ctxTimeout, pd.UserID, trace, place, s.SettingCache, s.Logger)
-	if err != nil {
-		return err
-	}
 	g, ctxTimeoutG := errgroup.WithContext(ctxTimeout)
 	var subb *models.Subscription
 	//параллельно делаем запросы для получения данных транзакции(если есть хоть одна ошибка - помечаем статус транзакции на rejected)
@@ -72,30 +68,32 @@ func (s *SubscriptionServiceImpl) ValidatePreCheckout(ctx context.Context, pd *m
 		}
 		subb = sub
 		if sub != nil && sub.Status == "rejected" {
-			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("attempt to repeat send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("attempt to send a rejected transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
+			return errors.New(text_messages.InvalidPaymentData)
+		}
+		if sub != nil && sub.Status == "paid" {
+			s.Logger.ZapLogger.Warn("GetStatusSubscription", zap.Error(errors.New("attempt to send a payed transaction")), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
 			return errors.New(text_messages.InvalidPaymentData)
 		}
 		return nil
 	})
-	err = g.Wait()
+	//делаем reject транзакции ассинхронно, не блокируя основной поток
+	err := g.Wait()
 	if err != nil {
-		if subb != nil && subb.Status != "rejected" {
-			rejerr := s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
-			if rejerr != nil {
-				s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
-				return errors.New(text_messages.TextErrorProcessPayment)
-			}
+		if subb != nil && subb.Status == "pending" {
+			go asyncRejectSub(pd, place, s.SubDatabase, s.Logger)
 		}
+		return err
+	}
+	price, err := getSubPrice(ctxTimeout, pd.UserID, trace, place, s.SettingCache, s.Logger)
+	if err != nil {
+		go asyncRejectSub(pd, place, s.SubDatabase, s.Logger)
 		return err
 	}
 	//сверяем цены
 	if pd != nil && price != pd.TotalAmount {
 		s.Logger.ZapLogger.Warn("Check Subscription Price", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
-		err = s.SubDatabase.RejectedPendingSubscription(ctxTimeout, pd.InvoicePayload, pd.UserID)
-		if err != nil {
-			s.Logger.ZapLogger.Error("RejectedPendingSubscription", zap.Error(err), zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
-			return errors.New(text_messages.TextErrorProcessPayment)
-		}
+		go asyncRejectSub(pd, place, s.SubDatabase, s.Logger)
 		return errors.New(text_messages.InvalidPaymentData)
 	}
 	s.Logger.ZapLogger.Info("PreCheckout validated successfully", zap.Any("userID", pd.UserID), zap.Any("payload", pd.InvoicePayload), zap.Any("traceID", trace.ID), zap.Any("place", place))
