@@ -5,6 +5,7 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
+	"bot_story_generator/internal/tracing"
 	"context"
 	"strings"
 	"sync"
@@ -28,9 +29,9 @@ type Bot struct {
 }
 
 type StoryRouter interface {
-	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument, trace models.Trace)
-	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string, trace models.Trace)
-	GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData)
+	AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument, trace tracing.Trace)
+	AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string, trace tracing.Trace)
+	GetRouterChans() ([]chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData)
 	CloseInputChans()
 }
 
@@ -66,34 +67,34 @@ func NewBot(cfg *config.Config, logger *logger.Logger, router StoryRouter) (*Bot
 }
 
 func (bot *Bot) StartBot() {
-	outbound, edit, delete, invoiceChan, pdchan := bot.router.GetRouterChans()
-
-	//maybe increase the number of worker-bots(field = numworkers)
-	bot.wg.Add(6)
-	go func() {
-		defer bot.wg.Done()
-		bot.readIncommingMessage()
-	}()
-	go func() {
-		defer bot.wg.Done()
-		bot.sendOutboundMessage(outbound)
-	}()
-	go func() {
-		defer bot.wg.Done()
-		bot.sendEditMessage(edit)
-	}()
-	go func() {
-		defer bot.wg.Done()
-		bot.sendDeleteMessage(delete)
-	}()
-	go func() {
-		defer bot.wg.Done()
-		bot.sendInvoiceMessage(invoiceChan)
-	}()
-	go func() {
-		defer bot.wg.Done()
-		bot.sendPaymentData(pdchan)
-	}()
+	outbounds, edit, delete, invoiceChan, pdchan := bot.router.GetRouterChans()
+	for i := 0; i < bot.numworkers; i++ {
+		bot.wg.Add(6)
+		go func() {
+			defer bot.wg.Done()
+			bot.sendOutboundMessage(outbounds[i])
+		}()
+		go func() {
+			defer bot.wg.Done()
+			bot.readIncommingMessage()
+		}()
+		go func() {
+			defer bot.wg.Done()
+			bot.sendEditMessage(edit)
+		}()
+		go func() {
+			defer bot.wg.Done()
+			bot.sendDeleteMessage(delete)
+		}()
+		go func() {
+			defer bot.wg.Done()
+			bot.sendInvoiceMessage(invoiceChan)
+		}()
+		go func() {
+			defer bot.wg.Done()
+			bot.sendPaymentData(pdchan)
+		}()
+	}
 }
 
 func (bot *Bot) readIncommingMessage() {
@@ -106,7 +107,7 @@ func (bot *Bot) readIncommingMessage() {
 				return
 			}
 			//executionTime у лога пишем только при отправке действия в ТГ-АПИ
-			trace := models.NewTrace()
+			trace := tracing.NewTrace()
 			// Обработка pre-checkout запроса для платежей (Stars/XTR)
 			// PreCheckoutQuery обрабатывается в боте, так как это системный запрос Telegram API
 			//обратиться за проверкой существования заказа в базу данных
@@ -207,7 +208,7 @@ func (bot *Bot) sendEditMessage(ch chan models.EditMessage) {
 			if !ok {
 				return
 			}
-			trace, ok := editMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			trace, ok := editMsg.Ctx.Value(tracing.TraceKey).(tracing.Trace)
 			if !ok {
 				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", editMsg.UserID), zap.Any("trace", trace))
 				continue
@@ -275,7 +276,7 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 			if !ok {
 				return
 			}
-			trace, ok := deleteMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			trace, ok := deleteMsg.Ctx.Value(tracing.TraceKey).(tracing.Trace)
 			if !ok {
 				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", deleteMsg.UserID), zap.Any("trace", trace))
 				continue
@@ -305,7 +306,7 @@ func (bot *Bot) sendDeleteMessage(ch chan models.DeleteMessage) {
 		}
 	}
 }
-func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string, trace models.Trace) int {
+func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string, trace tracing.Trace) int {
 	bot.mux.Lock()
 	msgId, ok := bot.payload_msgId[payload]
 	if !ok {
@@ -318,7 +319,7 @@ func (bot *Bot) getInvoiceId(payload string, userID int64, queryId string, trace
 		} else {
 			bot.logger.ZapLogger.Info("Made false-request to invoice successfully", zap.Any("userID", userID), zap.Any("payload", payload), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 		}
-		return 0
+		return -1
 	}
 	delete(bot.payload_msgId, payload)
 	bot.mux.Unlock()
@@ -340,7 +341,7 @@ func (bot *Bot) sendPaymentData(ch chan *models.PaymentData) {
 			trace := data.Trace
 			if data.Error != nil && data.ChargeID == "" && data.QueryID != "" {
 				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID, trace)
-				if msgId == 0 {
+				if msgId == -1 {
 					continue
 				}
 				//если в мапе есть ключ по payload - делаем запрос на ошибку checkoutQuery которая произошла в сервисе
@@ -360,7 +361,7 @@ func (bot *Bot) sendPaymentData(ch chan *models.PaymentData) {
 				}
 			} else if data.Error == nil && data.ChargeID == "" && data.QueryID != "" {
 				msgId := bot.getInvoiceId(data.InvoicePayload, data.UserID, data.QueryID, trace)
-				if msgId == 0 {
+				if msgId == -1 {
 					continue
 				}
 				_, err := bot.api.MakeRequest("answerPreCheckoutQuery", tgbotapi.Params{"pre_checkout_query_id": data.QueryID, "ok": "true"})
@@ -395,7 +396,7 @@ func (bot *Bot) sendInvoiceMessage(ch chan models.InvoiceMessage) {
 				return
 			}
 
-			trace, ok := msg.Ctx.Value(models.TraceKey).(models.Trace)
+			trace, ok := msg.Ctx.Value(tracing.TraceKey).(tracing.Trace)
 			if !ok {
 				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", msg.Subscription.UserID), zap.Any("traceID", trace.ID), zap.Any("executionTime", time.Since(trace.StartTime)))
 				continue
@@ -414,7 +415,7 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 			if !ok {
 				return
 			}
-			trace, ok := outMsg.Ctx.Value(models.TraceKey).(models.Trace)
+			trace, ok := outMsg.Ctx.Value(tracing.TraceKey).(tracing.Trace)
 			if !ok {
 				bot.logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("userID", outMsg.UserID), zap.Any("trace", trace))
 				continue
@@ -455,7 +456,7 @@ func (bot *Bot) sendOutboundMessage(ch chan models.OutboundMessage) {
 	}
 }
 
-func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg, trace models.Trace) (tgbotapi.Message, error) {
+func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg, trace tracing.Trace) (tgbotapi.Message, error) {
 	msg := tgbotapi.NewMessage(userID, text)
 	if len(butarg) > 0 {
 		var rows [][]tgbotapi.InlineKeyboardButton
@@ -491,7 +492,7 @@ func (bot *Bot) sendMessage(userID int64, text string, butarg []models.ButtonArg
 	return sentmsg, nil
 }
 
-func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string, trace models.Trace) {
+func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotapi.Message, userID int64, inputText []string, trace tracing.Trace) {
 	currentIdx := 1
 	if len(inputText) == 1 {
 		currentIdx = 0
@@ -563,7 +564,7 @@ func (bot *Bot) waitingMessageWithAnimation(ctx context.Context, sentMsg tgbotap
 }
 
 // * Функция отправки инвойса с подпиской
-func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription, trace models.Trace) {
+func (bot *Bot) sendSubscriptionInvoice(sub *models.Subscription, trace tracing.Trace) {
 	if sub == nil {
 		return
 	}

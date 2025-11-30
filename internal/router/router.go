@@ -5,6 +5,7 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
+	"bot_story_generator/internal/tracing"
 	"context"
 	"strings"
 	"sync"
@@ -44,9 +45,9 @@ type StoryRouterImpl struct {
 	admin_service          AdminService
 	sub_service            SubscriptionService
 	user_service           UserService
+	chans_outbound         []chan models.OutboundMessage
 	chan_command           chan models.IncommingMessage
 	chan_outbound_payments chan *models.PaymentData
-	chan_outbound          chan models.OutboundMessage
 	chan_edit              chan models.EditMessage
 	chan_delete            chan models.DeleteMessage
 	chan_bot_invoice       chan models.InvoiceMessage
@@ -61,6 +62,10 @@ type StoryRouterImpl struct {
 
 func NewRouter(cfg *config.Config, story StoryService, setting SettingService, admin AdminService, sub SubscriptionService, user UserService, logger *logger.Logger) *StoryRouterImpl {
 	context, cancel := context.WithCancel(context.Background())
+	queues := make([]chan models.OutboundMessage, cfg.Setting.NumWorkers)
+	for i := 0; i < cfg.Setting.NumWorkers; i++ {
+		queues[i] = make(chan models.OutboundMessage, 1000)
+	}
 	routerImpl := &StoryRouterImpl{
 		ctx:                    context,
 		cancel:                 cancel,
@@ -72,10 +77,10 @@ func NewRouter(cfg *config.Config, story StoryService, setting SettingService, a
 		chan_command:           make(chan models.IncommingMessage, 1000),
 		chan_outbound_payments: make(chan *models.PaymentData, 1000),
 		chan_payments:          make(chan *models.PaymentData, 1000),
-		chan_outbound:          make(chan models.OutboundMessage, 1000),
 		chan_edit:              make(chan models.EditMessage, 1000),
 		chan_delete:            make(chan models.DeleteMessage, 1000),
 		chan_bot_invoice:       make(chan models.InvoiceMessage, 1000),
+		chans_outbound:         queues,
 		userState:              make(map[int64]struct{}),
 		admins:                 cfg.Setting.Admins,
 		mux:                    &sync.RWMutex{},
@@ -121,7 +126,7 @@ func (r *StoryRouterImpl) paymentWorker() {
 			}
 			r.userState[data.UserID] = struct{}{}
 			r.mux.Unlock()
-			ctx := context.WithValue(r.ctx, models.TraceKey, data.Trace)
+			ctx := context.WithValue(r.ctx, tracing.TraceKey, data.Trace)
 			if data.ChargeID == "" && data.QueryID != "" {
 				//TODO добавить таймаут на выполнение
 				r.logger.ZapLogger.Info("Validating PreCheckoutQuery...", zap.Any("userID", data.UserID), zap.Any("payload", data.InvoicePayload), zap.Any("traceID", data.Trace.ID))
@@ -171,7 +176,7 @@ func (r *StoryRouterImpl) routerWorker() {
 			userID := msg.UserID
 			msgID := msg.MsgID
 			trace := msg.Trace
-			ctx := context.WithValue(r.ctx, models.TraceKey, trace)
+			ctx := context.WithValue(r.ctx, tracing.TraceKey, trace)
 			if data == "start" {
 				//2 лог
 				r.logger.ZapLogger.Info("Creating user...", zap.Any("userID", userID), zap.Any("traceID", trace.ID))
@@ -423,7 +428,7 @@ func (r *StoryRouterImpl) routerWorker() {
 	}
 }
 
-func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument, trace models.Trace) {
+func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int64, msgID int, arguments []models.Argument, trace tracing.Trace) {
 	select {
 	case <-r.ctx.Done():
 		return
@@ -432,7 +437,7 @@ func (r *StoryRouterImpl) AddComand(ctx context.Context, data string, userID int
 	case r.chan_command <- models.NewIncommingMessage(data, userID, msgID, arguments, trace):
 	}
 }
-func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string, trace models.Trace) {
+func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, payload string, queryId string, amount int, currency string, chargeID string, trace tracing.Trace) {
 	select {
 	case <-r.ctx.Done():
 		return
@@ -441,8 +446,8 @@ func (r *StoryRouterImpl) AddPaymentQuery(ctx context.Context, userID int64, pay
 	case r.chan_payments <- models.NewPaymentData(queryId, currency, payload, amount, userID, chargeID, trace):
 	}
 }
-func (r *StoryRouterImpl) GetRouterChans() (chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData) {
-	return r.chan_outbound, r.chan_edit, r.chan_delete, r.chan_bot_invoice, r.chan_outbound_payments
+func (r *StoryRouterImpl) GetRouterChans() ([]chan models.OutboundMessage, chan models.EditMessage, chan models.DeleteMessage, chan models.InvoiceMessage, chan *models.PaymentData) {
+	return r.chans_outbound, r.chan_edit, r.chan_delete, r.chan_bot_invoice, r.chan_outbound_payments
 }
 
 func (r *StoryRouterImpl) CloseInputChans() {
@@ -453,7 +458,9 @@ func (r *StoryRouterImpl) CloseInputChans() {
 func (r *StoryRouterImpl) Stop() {
 	r.cancel()
 	r.wg.Wait()
-	close(r.chan_outbound)
+	for i := 0; i < r.numworkers; i++ {
+		close(r.chans_outbound[i])
+	}
 	close(r.chan_edit)
 	close(r.chan_delete)
 	close(r.chan_bot_invoice)

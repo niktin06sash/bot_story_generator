@@ -4,6 +4,7 @@ import (
 	"bot_story_generator/internal/logger"
 	"bot_story_generator/internal/models"
 	"bot_story_generator/internal/text_messages"
+	"bot_story_generator/internal/tracing"
 	"context"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, step int, trace models.Trace, LogPlace string, daydb DailyLimitDatabase, txman TxManager, logger *logger.Logger) error {
+func updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLimit, step int, trace tracing.Trace, LogPlace string, daydb DailyLimitDatabase, txman TxManager, logger *logger.Logger) error {
 	if limit == nil {
 		rollbackErr := txman.RollbackTx(context.Background(), tx)
 		if rollbackErr != nil {
@@ -48,7 +49,7 @@ func updateOrAddDailyLimit(ctx context.Context, tx pgx.Tx, limit *models.DailyLi
 	}
 	return nil
 }
-func checkDailyLimits(ctx context.Context, userID int64, trace models.Trace, LogPlace string, dcache DailyLimitCache, dbd DailyLimitDatabase, subdb SubscriptionDatabase, setcache SettingCache, logger *logger.Logger) (*models.DailyLimit, error) {
+func checkDailyLimits(ctx context.Context, userID int64, trace tracing.Trace, LogPlace string, dcache DailyLimitCache, dbd DailyLimitDatabase, subdb SubscriptionDatabase, setcache SettingCache, logger *logger.Logger) (*models.DailyLimit, error) {
 	//Проверяем превышение лимита в кэше
 	isExist, err := dcache.CheckExceededLimit(ctx, userID)
 	if err != nil {
@@ -131,7 +132,7 @@ func checkDailyLimits(ctx context.Context, userID int64, trace models.Trace, Log
 	}
 	return limitv, nil
 }
-func getSubPrice(ctx context.Context, userID int64, trace models.Trace, logPlace string, settCache SettingCache, logger *logger.Logger) (int, error) {
+func getSubPrice(ctx context.Context, userID int64, trace tracing.Trace, logPlace string, settCache SettingCache, logger *logger.Logger) (int, error) {
 	price, err := settCache.GetSetting(ctx, models.SettingKeyPriceBasicSubscription)
 	if err != nil {
 		logger.ZapLogger.Error("GetSetting", zap.Error(err), zap.Any("userID", userID), zap.Any("traceID", trace.ID), zap.Any("place", logPlace))
@@ -145,11 +146,11 @@ func getSubPrice(ctx context.Context, userID int64, trace models.Trace, logPlace
 	}
 	return priceInt, nil
 }
-func getTrace(ctx context.Context, logger *logger.Logger) models.Trace {
-	trace, ok := ctx.Value(models.TraceKey).(models.Trace)
+func getTrace(ctx context.Context, logger *logger.Logger) tracing.Trace {
+	trace, ok := ctx.Value(tracing.TraceKey).(tracing.Trace)
 	if !ok {
 		logger.ZapLogger.Warn("Context value for 'trace' is not a models.Trace", zap.Any("trace", trace))
-		return models.Trace{}
+		return tracing.Trace{}
 	}
 	return trace
 }
