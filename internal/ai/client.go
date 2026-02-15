@@ -1,0 +1,97 @@
+package ai
+
+import (
+	"bot_story_generator/internal/models"
+
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/openai/openai-go/v3"
+)
+
+type StoryAIImpl struct {
+	conn *AIConnection
+}
+
+func NewStoryAI(conn *AIConnection) *StoryAIImpl {
+	return &StoryAIImpl{
+		conn: conn,
+	}
+}
+
+func (ah *StoryAIImpl) GetStructuredHeroes(parctx context.Context) (*models.FantasyCharacters, error) {
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel(ah.conn.model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(ah.conn.main_game_rules_promt),
+			openai.UserMessage(ah.conn.create_hero_promt),
+		},
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: ah.conn.heroschema,
+			},
+		},
+	}
+
+	resp, err := ah.conn.client.Chat.Completions.New(parctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return nil, nil
+	}
+
+	var fantasyCharacters models.FantasyCharacters
+	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &fantasyCharacters); err != nil {
+		return nil, err
+	}
+
+	return &fantasyCharacters, nil
+}
+
+func (ah *StoryAIImpl) GenerateNextStorySegment(parctx context.Context, storyData []*models.StoryMessage) (*models.StoryNode, error) {
+	//Избавляемся от переаллокации append
+	messages := make([]openai.ChatCompletionMessageParamUnion, len(storyData)+1)
+
+	// 1. Добавляем правила игры
+	messages[0] = openai.SystemMessage(ah.conn.main_game_rules_promt)
+
+	// 2. Проходим по всей хронологии из БД
+	for i := 1; i < len(messages); i++ {
+		msg := storyData[i-1]
+		switch msg.Type {
+		case "user":
+			messages[i] = openai.UserMessage(msg.Data)
+		case "assistant":
+			messages[i] = openai.AssistantMessage(msg.Data)
+		default:
+			return nil, fmt.Errorf("invalid story segment type")
+		}
+	}
+	params := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(ah.conn.model),
+		Messages: messages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: ah.conn.segschema,
+			},
+		},
+	}
+
+	resp, err := ah.conn.client.Chat.Completions.New(parctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return nil, nil
+	}
+
+	var StoryNode models.StoryNode
+	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &StoryNode); err != nil {
+		return nil, err
+	}
+
+	return &StoryNode, nil
+
+}
