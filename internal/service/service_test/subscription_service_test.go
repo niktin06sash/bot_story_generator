@@ -7,6 +7,7 @@ import (
 	"bot_story_generator/internal/service"
 	mock_service "bot_story_generator/internal/service/mocks"
 	"bot_story_generator/internal/text_messages"
+	"bot_story_generator/internal/tracing"
 	"context"
 	"fmt"
 	"testing"
@@ -43,7 +44,7 @@ func TestValidatePreCheckout_Success(t *testing.T) {
 		Currency:       "XTR",
 		InvoicePayload: payload,
 		TotalAmount:    1000,
-		Trace:          models.NewTrace(),
+		Trace:          tracing.NewTrace(),
 	}
 	err := serv.ValidatePreCheckout(ctx, pd)
 	require.Nil(t, err)
@@ -96,7 +97,7 @@ func TestCommitSubscription_Success(t *testing.T) {
 		Currency:       "XTR",
 		InvoicePayload: payload,
 		TotalAmount:    1000,
-		Trace:          models.NewTrace(),
+		Trace:          tracing.NewTrace(),
 	}
 	err := serv.CommitSubscription(ctx, pd)
 	require.Nil(t, err)

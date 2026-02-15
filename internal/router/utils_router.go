@@ -6,10 +6,12 @@ import (
 )
 
 func (r *StoryRouterImpl) createOutboundMessage(ctx context.Context, userID int64, text string, butargs ...models.ButtonArg) {
+	idx := int(userID % int64(r.numworkers))
+	queue := r.chans_outbound[idx]
 	select {
 	case <-r.ctx.Done():
 		return
-	case r.chan_outbound <- models.NewOutboundMessage(ctx, userID, text, butargs...):
+	case queue <- models.NewOutboundMessage(ctx, userID, text, butargs...):
 	}
 }
 func (r *StoryRouterImpl) createEditMessage(ctx context.Context, userID int64, msgID int, text string, butargs ...models.ButtonArg) {
