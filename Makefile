@@ -5,9 +5,9 @@ export
 all: start
 
 migrate-up:
-	migrate -path ./internal/schema -database "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${POSTGRES_DB}?sslmode=disable" up
+	migrate -path ./internal/schema -database "${DATABASE_CONNECT_URL}" up
 migrate-down:
-	migrate -path ./internal/schema -database "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST}:${DATABASE_PORT}/${POSTGRES_DB}?sslmode=disable" down
+	migrate -path ./internal/schema -database "${DATABASE_CONNECT_URL}" down
 tests:
 	cd "internal/service/service_test/" && go test -v ./...
 build:
