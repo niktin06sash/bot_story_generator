@@ -70,7 +70,6 @@ type ServerSetting struct {
 
 func NewConfig() (*Config, error) {
 	err := godotenv.Load("cfg.env")
-
 	if err != nil {
 		return nil, err
 	}
